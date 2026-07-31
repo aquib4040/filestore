@@ -90,7 +90,7 @@ filestore/
 
 *   **👥 Multi-Bot Cloning**: Users can spawn their own personal clone bot instances using the `/clone` command with an interactive 3-step setup (Bot Token → MongoDB URI → DB Storage Channel with live admin verification).
 *   **🛡️ Fail-Safe Base64 Link Payload**: Download links embed `channel_id` and `message_id`(s) directly inside the Base64 payload (`get_<channelID>_<msgID>`). If MongoDB is offline, wiped, or banned, links continue working 100% statelessly directly from Telegram!
-*   **🔒 AES-256-GCM Token Encryption**: Clone bot tokens are encrypted in MongoDB using AES-256-GCM authenticated encryption, protecting them from raw database leaks.
+*   **🔒 AES-256-GCM Token Encryption**: Clone bot tokens are encrypted in MongoDB using military-grade **AES-256-GCM** authenticated encryption. Generate keys online at [aquib4040.github.io/filestore/key_generator.html](https://aquib4040.github.io/filestore/key_generator.html).
 *   **📡 Force Subscription (FSub) & Join Request Approval**: Restricts file access until users join configured FSub channels. Automatically approves monitored channel join requests.
 *   **📨 Live Progress Broadcasts**: Background copy-broadcasting to all users with real-time status reporting, interactive progress bars (`[████░░░░░░] 40%`), and flood-wait retry handling.
 *   **⏱️ Downloader Preferences (`/mysettings`)**: Per-user customizable auto-delete timers (1m, 5m, 15m, 30m) and forward protection toggles.
@@ -167,7 +167,7 @@ CLONE_LIMIT=3                # Maximum cloned bots allowed per User ID
 CLONE_ALLOW=true             # Enable/disable cloning feature (true/false)
 
 # --- SECURITY (ENCRYPTION) ---
-TOKEN_ENCRYPTION_KEY=""      # 32-char key to encrypt bot tokens in DB (generate via key_generator.html)
+TOKEN_ENCRYPTION_KEY=""      # 32-char key to encrypt bot tokens in DB (Generate key: https://aquib4040.github.io/filestore/key_generator.html)
 
 # --- KEEP-AWAKE WORKER ---
 FQDN="mybot.render.com"      # App domain to activate 3-minute self-ping worker
