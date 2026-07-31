@@ -1,0 +1,39 @@
+# Koyeb App Blueprint
+apiVersion: koyeb.com/v1alpha1
+kind: Deployment
+metadata:
+  name: go-filestore-bot
+spec:
+  routes:
+    - port: 8080
+      path: /
+  ports:
+    - port: 8080
+      protocol: HTTP
+  regions:
+    - fra
+  instance_type: nano
+  scalings:
+    - min: 1
+      max: 1
+  definition:
+    type: git
+    repository: github.com/your-username/filestore
+    branch: main
+    buildpack:
+      privileged: false
+    env:
+      - key: PORT
+        value: "8080"
+      - key: API_ID
+        value: "0"
+      - key: API_HASH
+        value: ""
+      - key: BOT_TOKEN
+        value: ""
+      - key: MONGO_URI
+        value: ""
+      - key: OWNER_ID
+        value: "0"
+      - key: TOKEN_ENCRYPTION_KEY
+        value: ""

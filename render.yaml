@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: go-filestore-bot
+    env: docker
+    plan: free
+    region: oregon
+    dockerFilePath: Dockerfile
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: PORT
+        value: 10000

@@ -1,0 +1,9 @@
+setup:
+  addons:
+    - plan: mongolab:sandbox
+      as: MONGO
+build:
+  docker:
+    web: Dockerfile
+run:
+  web: /app/bot

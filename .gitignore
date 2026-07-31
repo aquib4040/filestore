@@ -1,0 +1,23 @@
+# Environment & Secrets
+.env
+.env.local
+
+# Telegram Sessions
+.sessions/
+
+# Binaries & Executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/bot
+filestore
+
+# Logs
+*.log
+
+# IDE & OS files
+.DS_Store
+.idea/
+.vscode/

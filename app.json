@@ -1,0 +1,63 @@
+{
+  "name": "Go FileStore Bot",
+  "description": "High-performance Telegram File Store Bot written in Go with Multi-Bot Clones support.",
+  "repository": "https://github.com/aquib4040/filestore",
+  "logo": "https://raw.githubusercontent.com/gotd/td/main/.github/logo.png",
+  "keywords": ["telegram", "filestore", "go", "mtproto", "multi-bot", "clones"],
+  "env": {
+    "API_ID": {
+      "description": "Get this from my.telegram.org",
+      "value": ""
+    },
+    "API_HASH": {
+      "description": "Get this from my.telegram.org",
+      "value": ""
+    },
+    "BOT_TOKEN": {
+      "description": "Get this from @BotFather",
+      "value": ""
+    },
+    "MONGO_URI": {
+      "description": "Your MongoDB connection URI string",
+      "value": ""
+    },
+    "DB_NAME": {
+      "description": "Database name inside MongoDB",
+      "value": "filestore"
+    },
+    "OWNER_ID": {
+      "description": "Your Telegram User ID (as primary administrator)",
+      "value": ""
+    },
+    "AUTO_DEL": {
+      "description": "Global default time (seconds) to wait before deleting shared messages (0 to disable)",
+      "value": "300"
+    },
+    "DISABLE_BTN": {
+      "description": "Prevent sharing or forwarding messages",
+      "value": "true"
+    },
+    "PROTECT": {
+      "description": "Block screenshot/saving of media files",
+      "value": "true"
+    },
+    "CLONE_LIMIT": {
+      "description": "Maximum number of cloned bots allowed per user ID",
+      "value": "3"
+    },
+    "CLONE_ALLOW": {
+      "description": "Enable or disable user-cloning features dynamically (true/false)",
+      "value": "true"
+    },
+    "TOKEN_ENCRYPTION_KEY": {
+      "description": "Symmetric passphrase to securely encrypt user bot tokens inside MongoDB",
+      "value": ""
+    },
+    "FQDN": {
+      "description": "Your app's domain (e.g. myapp.herokuapp.com) to activate the self-ping anti-sleep worker",
+      "value": "",
+      "required": false
+    }
+  },
+  "stack": "container"
+}
