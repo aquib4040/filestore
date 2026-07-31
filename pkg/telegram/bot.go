@@ -181,6 +181,19 @@ func (bm *BotManager) RegisterClone(ctx context.Context, token, mongoURI string,
 		return "", fmt.Errorf("bot is already running")
 	}
 
+	// Verify custom MongoDB connection if provided
+	if mongoURI != "" {
+		testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		testDB, err := db.NewMongoDB(mongoURI, "filestore", bm.mongo.TokenCryptKey())
+		if err != nil {
+			return "", fmt.Errorf("invalid MongoDB connection string: %w", err)
+		}
+		if err := testDB.DB.Client().Ping(testCtx, nil); err != nil {
+			return "", fmt.Errorf("cannot connect to custom MongoDB: %w", err)
+		}
+	}
+
 	// Test the client connection and get details
 	sessionPath := filepath.Join(".sessions", fmt.Sprintf("session_%s.json", hashToken(token)))
 	sessionStorage := &telegram.FileSessionStorage{
