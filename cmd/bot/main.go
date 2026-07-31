@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,20 @@ import (
 
 	"go.uber.org/zap"
 )
+
+func init() {
+	// Force Go net resolver to use Google Public DNS directly, bypassing Docker's DNS server
+	// to fix SRV lookup failures (lookup _mongodb._tcp... on 127.0.0.11:53)
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{
+				Timeout: time.Second * 5,
+			}
+			return d.DialContext(ctx, "udp", "8.8.8.8:53")
+		},
+	}
+}
 
 func main() {
 	// Initialize logger
