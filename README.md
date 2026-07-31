@@ -32,16 +32,19 @@
 
 ---
 
-## 🚀 One-Click Cloud Deploys
+## 🚀 One-Click Cloud Deploys (100% Free Hosting)
 
-Deploy your high-performance FileStore bot instantly to cloud platforms:
+Deploy your high-performance FileStore bot instantly to free cloud platforms:
 
-[![Deploy to Render](https://img.shields.io/badge/Deploy%20to-Render-black?style=for-the-badge&logo=render)](https://render.com/deploy?repo=https://github.com/aquib4040/filestore)
-[![Deploy to Heroku](https://img.shields.io/badge/Deploy%20to-Heroku-purple?style=for-the-badge&logo=heroku)](https://www.heroku.com/deploy/?template=https://github.com/aquib4040/filestore)
 [![Deploy to Koyeb](https://img.shields.io/badge/Deploy%20to-Koyeb-blue?style=for-the-badge&logo=koyeb)](https://app.koyeb.com/deploy?repository=github.com/aquib4040/filestore&branch=main&name=go-filestore)
-[![Deploy to Zeabur](https://img.shields.io/badge/Deploy%20to-Zeabur-darkgreen?style=for-the-badge&logo=zeabur)](https://zeabur.com)
+[![Deploy to Render](https://img.shields.io/badge/Deploy%20to-Render-black?style=for-the-badge&logo=render)](https://render.com/deploy?repo=https://github.com/aquib4040/filestore)
+[![Deploy to Hugging Face](https://img.shields.io/badge/Deploy%20to-HuggingFace-yellow?style=for-the-badge&logo=huggingface)](https://huggingface.co/new-space)
+[![Deploy to Heroku](https://img.shields.io/badge/Deploy%20to-Heroku-purple?style=for-the-badge&logo=heroku)](https://www.heroku.com/deploy/?template=https://github.com/aquib4040/filestore)
 
-*(For Zeabur, create a project and link your GitHub repository: `https://github.com/aquib4040/filestore`)*
+### 📌 Top Recommended 100% Free Hosts:
+1. **Koyeb** *(Recommended)*: Free Nano instance (512MB RAM, 24/7 online). Click the Koyeb button above, sign in with GitHub, set your environment variables, and click Deploy.
+2. **Hugging Face Spaces**: 100% Free 24/7 Docker hosting (16GB RAM). Create a Space → Choose **Docker** → Connect repo `aquib4040/filestore` → Add `.env` under Settings → Repository Secrets.
+3. **Render**: Free Web Service plan (750 free hours/month). Uses `render.yaml` blueprint.
 
 ---
 
