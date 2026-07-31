@@ -1,6 +1,8 @@
 package telegram
 
 import (
+	"crypto/rand"
+	"math/big"
 	"strings"
 
 	"github.com/gotd/td/tg"
@@ -64,4 +66,12 @@ func ToSmallCaps(s string) string {
 		}
 	}
 	return sb.String()
+}
+
+func getRandomID() int64 {
+	n, err := rand.Int(rand.Reader, big.NewInt(1<<62))
+	if err != nil {
+		return 0
+	}
+	return n.Int64()
 }

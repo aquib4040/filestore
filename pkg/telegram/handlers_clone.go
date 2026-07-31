@@ -564,6 +564,7 @@ func (bm *BotManager) sendCloneSettingsPanel(ctx context.Context, client *telegr
 		Message:     msg,
 		ReplyMarkup: NewInlineMarkup(rows),
 		NoWebpage:   true,
+		RandomID:    getRandomID(),
 	})
 	return err
 }
@@ -695,6 +696,7 @@ func (bm *BotManager) sendCloneMySettingsPanel(ctx context.Context, client *tele
 		Message:     msg,
 		ReplyMarkup: NewInlineMarkup(rows),
 		NoWebpage:   true,
+		RandomID:    getRandomID(),
 	})
 	return err
 }
@@ -817,9 +819,10 @@ func (bm *BotManager) updateCloneField(ctx context.Context, token, field string,
 // Cloned Bot messengers
 func (bm *BotManager) sendCloneText(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, text string) error {
 	_, err := client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
-		Peer:    peer,
-		Message: text,
+		Peer:      peer,
+		Message:   text,
 		NoWebpage: true,
+		RandomID:  getRandomID(),
 	})
 	return err
 }
@@ -830,6 +833,7 @@ func (bm *BotManager) sendCloneTextWithMarkup(ctx context.Context, client *teleg
 		Message:     text,
 		ReplyMarkup: markup,
 		NoWebpage:   true,
+		RandomID:    getRandomID(),
 	})
 	return err
 }
@@ -849,8 +853,9 @@ func (bm *BotManager) handleCloneBroadcast(ctx context.Context, client *telegram
 
 	// Send initial status message to owner
 	statusMsg, err := client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
-		Peer:    ownerPeer,
-		Message: fmt.Sprintf("✦ %s ✦\n\nStarting broadcast...", ToSmallCaps("Broadcast Status")),
+		Peer:     ownerPeer,
+		Message:  fmt.Sprintf("✦ %s ✦\n\nStarting broadcast...", ToSmallCaps("Broadcast Status")),
+		RandomID: getRandomID(),
 	})
 	var statusMsgID int
 	if updates, ok := statusMsg.(*tg.Updates); ok {

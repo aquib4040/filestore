@@ -1097,6 +1097,7 @@ func (bm *BotManager) sendText(ctx context.Context, peer tg.InputPeerClass, text
 		Peer:      peer,
 		Message:   text,
 		NoWebpage: true,
+		RandomID:  getRandomID(),
 	})
 	return err
 }
@@ -1107,6 +1108,7 @@ func (bm *BotManager) sendTextWithMarkup(ctx context.Context, peer tg.InputPeerC
 		Message:     text,
 		ReplyMarkup: markup,
 		NoWebpage:   true,
+		RandomID:    getRandomID(),
 	})
 	return err
 }
@@ -1236,8 +1238,9 @@ func (bm *BotManager) handleMainBroadcast(ctx context.Context, message string, r
 
 	// Send initial status message to owner
 	statusMsg, err := bm.primary.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
-		Peer:    ownerPeer,
-		Message: fmt.Sprintf("✦ %s ✦\n\nStarting broadcast...", ToSmallCaps("Broadcast Status")),
+		Peer:     ownerPeer,
+		Message:  fmt.Sprintf("✦ %s ✦\n\nStarting broadcast...", ToSmallCaps("Broadcast Status")),
+		RandomID: getRandomID(),
 	})
 	var statusMsgID int
 	if updates, ok := statusMsg.(*tg.Updates); ok {
