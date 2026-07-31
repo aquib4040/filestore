@@ -27,6 +27,11 @@ func (bm *BotManager) registerMainHandlers(dispatcher *tg.UpdateDispatcher) {
 			return nil
 		}
 
+		// Dynamically register admin command scope with verified AccessHash
+		if user, exists := entities.Users[userID]; exists {
+			go bm.SetupAdminCommands(ctx, userID, user.AccessHash)
+		}
+
 		// Handle State Listeners (client.listen equivalent)
 		if bm.state.Push(userID, msg.Message) {
 			return nil // consumed by listener
@@ -100,6 +105,16 @@ func (bm *BotManager) registerCloneHandlers(dispatcher *tg.UpdateDispatcher, tok
 
 		if msg.Out {
 			return nil
+		}
+
+		// Dynamically register clone owner commands with verified AccessHash
+		if user, exists := entities.Users[userID]; exists {
+			if client, exists := bm.clones[token]; exists {
+				botDoc, err := bm.mongo.GetClonedBot(ctx, token)
+				if err == nil && botDoc.UserID == userID {
+					go bm.SetupCloneCommands(ctx, client, userID, user.AccessHash)
+				}
+			}
 		}
 
 		if strings.HasPrefix(msg.Message, "/") {

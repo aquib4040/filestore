@@ -263,6 +263,25 @@ func (m *MongoDB) GetClonedBots(ctx context.Context) ([]ClonedBotDoc, error) {
 	return bots, nil
 }
 
+func (m *MongoDB) GetClonedBot(ctx context.Context, token string) (ClonedBotDoc, error) {
+	var b ClonedBotDoc
+	encToken, _ := crypto.Encrypt(token, m.tokenCryptKey)
+	err := m.bots.FindOne(ctx, bson.M{
+		"$or": []bson.M{
+			{"token": encToken},
+			{"token": token},
+		},
+	}).Decode(&b)
+	if err != nil {
+		return b, err
+	}
+	decToken, err := crypto.Decrypt(b.Token, m.tokenCryptKey)
+	if err == nil {
+		b.Token = decToken
+	}
+	return b, nil
+}
+
 func (m *MongoDB) UpdateClonedBotShortener(ctx context.Context, token, api, baseSite string) error {
 	encToken, _ := crypto.Encrypt(token, m.tokenCryptKey)
 	_, err := m.bots.UpdateOne(ctx,

@@ -9,12 +9,10 @@ import (
 	"time"
 
 	"filestore/pkg/config"
-	"filestore/pkg/crypto"
 	"filestore/pkg/db"
 
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.uber.org/zap"
 )
 
@@ -139,20 +137,10 @@ func (bm *BotManager) runBot(ctx context.Context, token string, isClone bool) er
 
 		// Automatically configure bot commands on startup
 		if isClone {
-			var botDoc db.ClonedBotDoc
-			encToken, _ := crypto.Encrypt(token, bm.mongo.TokenCryptKey())
-			err := bm.mongo.DB.Collection("bots").FindOne(ctx, bson.M{
-				"$or": []bson.M{
-					{"token": encToken},
-					{"token": token},
-				},
-			}).Decode(&botDoc)
-			if err == nil {
-				go func() {
-					time.Sleep(3 * time.Second)
-					_ = bm.setCloneBotCommands(ctx, client, botDoc.UserID)
-				}()
-			}
+			go func() {
+				time.Sleep(3 * time.Second)
+				_ = bm.setCloneBotCommands(ctx, client, 0)
+			}()
 		} else {
 			go func() {
 				time.Sleep(3 * time.Second)
@@ -365,8 +353,15 @@ func (bm *BotManager) setMainBotCommands(ctx context.Context, client *telegram.C
 		LangCode: "en",
 		Commands: defaultCmds,
 	})
+	return nil
+}
 
-	// 2. Admin commands (for the main bot owner and dynamic admins)
+func (bm *BotManager) SetupAdminCommands(ctx context.Context, userID, accessHash int64) {
+	if !bm.isAdmin(userID) {
+		return
+	}
+	api := bm.primary.API()
+
 	adminCmds := []tg.BotCommand{
 		{Command: "start", Description: "Start the bot"},
 		{Command: "settings", Description: "Admin control panel"},
@@ -391,20 +386,13 @@ func (bm *BotManager) setMainBotCommands(ctx context.Context, client *telegram.C
 			tg.BotCommand{Command: "deletecloned", Description: "Delete clone bot instance"},
 		)
 	}
-	// Combine Owner ID and dynamic admins
-	allAdmins := append([]int64{bm.config.OwnerID}, bm.admins...)
-	for _, adminID := range allAdmins {
-		if adminID == 0 {
-			continue
-		}
-		adminPeer := &tg.InputPeerUser{UserID: adminID}
-		_, _ = api.BotsSetBotCommands(ctx, &tg.BotsSetBotCommandsRequest{
-			Scope:    &tg.BotCommandScopePeer{Peer: adminPeer},
-			LangCode: "en",
-			Commands: adminCmds,
-		})
-	}
-	return nil
+
+	adminPeer := &tg.InputPeerUser{UserID: userID, AccessHash: accessHash}
+	_, _ = api.BotsSetBotCommands(ctx, &tg.BotsSetBotCommandsRequest{
+		Scope:    &tg.BotCommandScopePeer{Peer: adminPeer},
+		LangCode: "en",
+		Commands: adminCmds,
+	})
 }
 
 func (bm *BotManager) setCloneBotCommands(ctx context.Context, client *telegram.Client, ownerID int64) error {
@@ -421,8 +409,12 @@ func (bm *BotManager) setCloneBotCommands(ctx context.Context, client *telegram.
 		LangCode: "en",
 		Commands: defaultCmds,
 	})
+	return nil
+}
 
-	// 2. Owner commands (specifically scoped for the clone bot owner)
+func (bm *BotManager) SetupCloneCommands(ctx context.Context, client *telegram.Client, ownerID, accessHash int64) {
+	api := client.API()
+
 	ownerCmds := []tg.BotCommand{
 		{Command: "start", Description: "Start the bot"},
 		{Command: "settings", Description: "Clone Settings Dashboard"},
@@ -437,11 +429,10 @@ func (bm *BotManager) setCloneBotCommands(ctx context.Context, client *telegram.
 		{Command: "premiumusers", Description: "List all premium users"},
 		{Command: "profile", Description: "View user profile details"},
 	}
-	ownerPeer := &tg.InputPeerUser{UserID: ownerID}
+	ownerPeer := &tg.InputPeerUser{UserID: ownerID, AccessHash: accessHash}
 	_, _ = api.BotsSetBotCommands(ctx, &tg.BotsSetBotCommandsRequest{
 		Scope:    &tg.BotCommandScopePeer{Peer: ownerPeer},
 		LangCode: "en",
 		Commands: ownerCmds,
 	})
-	return nil
 }
