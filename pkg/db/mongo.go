@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
 type UserDoc struct {
@@ -65,6 +66,10 @@ func NewMongoDB(uri, dbName, tokenCryptKey string) (*MongoDB, error) {
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
 	if err != nil {
+		return nil, err
+	}
+
+	if err := client.Ping(ctx, readpref.Primary()); err != nil {
 		return nil, err
 	}
 
