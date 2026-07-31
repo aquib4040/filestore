@@ -7,21 +7,24 @@ import (
 )
 
 type Config struct {
-	APIID         int
-	APIHash       string
-	BotToken      string
-	MongoURI      string
-	DBName        string
-	OwnerID       int64
-	Admins        []int64
-	Port          string
-	AutoDel       int
-	DisableBtn    bool
-	Protect       bool
-	TokenCryptKey string
-	CloneLimit    int
-	CloneAllow    bool
-	FQDN          string
+	APIID          int
+	APIHash        string
+	BotToken       string
+	MongoURI       string
+	DBName         string
+	OwnerID        int64
+	Admins         []int64
+	Port           string
+	AutoDel        int
+	DisableBtn     bool
+	Protect        bool
+	TokenCryptKey  string
+	CloneLimit     int
+	CloneAllow     bool
+	FQDN           string
+	UpstreamRepo   string
+	UpstreamBranch string
+	GithubToken    string
 }
 
 func LoadConfig() (*Config, error) {
@@ -37,21 +40,24 @@ func LoadConfig() (*Config, error) {
 	admins := parseAdmins(getEnv("ADMINS", ""), ownerID)
 
 	return &Config{
-		APIID:         apiID,
-		APIHash:       getEnv("API_HASH", ""),
-		BotToken:      getEnv("BOT_TOKEN", ""),
-		MongoURI:      getEnv("MONGO_URI", ""),
-		DBName:        getEnv("DB_NAME", "filestore"),
-		OwnerID:       ownerID,
-		Admins:        admins,
-		Port:          getEnv("PORT", "8080"),
-		AutoDel:       autoDel,
-		DisableBtn:    disableBtn,
-		Protect:       protect,
-		TokenCryptKey: getEnv("TOKEN_ENCRYPTION_KEY", ""),
-		CloneLimit:    cloneLimit,
-		CloneAllow:    cloneAllow,
-		FQDN:          getEnv("FQDN", ""),
+		APIID:          apiID,
+		APIHash:        getEnv("API_HASH", ""),
+		BotToken:       getEnv("BOT_TOKEN", ""),
+		MongoURI:       getEnv("MONGO_URI", ""),
+		DBName:         getEnv("DB_NAME", "filestore"),
+		OwnerID:        ownerID,
+		Admins:         admins,
+		Port:           getEnv("PORT", "8080"),
+		AutoDel:        autoDel,
+		DisableBtn:     disableBtn,
+		Protect:        protect,
+		TokenCryptKey:  getEnv("TOKEN_ENCRYPTION_KEY", ""),
+		CloneLimit:     cloneLimit,
+		CloneAllow:     cloneAllow,
+		FQDN:           getEnv("FQDN", ""),
+		UpstreamRepo:   getEnv("UPSTREAM_REPO", "https://github.com/aquib4040/filestore.git"),
+		UpstreamBranch: getEnv("UPSTREAM_BRANCH", "main"),
+		GithubToken:    getEnv("GITHUB_TOKEN", ""),
 	}, nil
 }
 

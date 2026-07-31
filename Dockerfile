@@ -18,8 +18,8 @@ FROM alpine:latest
 
 WORKDIR /app
 
-# Install CA certificates for secure HTTPS API calls
-RUN apk --no-cache add ca-certificates
+# Install CA certificates, git, and tzdata for git update functionality
+RUN apk --no-cache add ca-certificates git tzdata
 
 # Copy the binary and env configurations from the build stage
 COPY --from=builder /app/bot .

@@ -375,6 +375,8 @@ func (bm *BotManager) setMainBotCommands(ctx context.Context, client *telegram.C
 		{Command: "delpremium", Description: "Revoke premium from a user"},
 		{Command: "premiumusers", Description: "List all premium users"},
 		{Command: "profile", Description: "View user profile details"},
+		{Command: "update", Description: "Update bot from upstream repo"},
+		{Command: "restart", Description: "Restart the bot process"},
 	}
 	if bm.config.CloneAllow {
 		adminCmds = append(adminCmds,

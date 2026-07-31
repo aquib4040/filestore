@@ -12,6 +12,7 @@ import (
 
 	"filestore/pkg/db"
 	"filestore/pkg/shortener"
+	"filestore/pkg/update"
 
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
@@ -185,6 +186,30 @@ func (bm *BotManager) handleMainCommand(ctx context.Context, userID int64, cmd s
 		}
 		go bm.handleMainBroadcast(ctx, strings.Join(args, " "), replyToMsgID, peer)
 		return bm.sendText(ctx, peer, "Broadcast started in background...")
+	case "/update":
+		if !bm.isAdmin(userID) {
+			return bm.sendText(ctx, peer, "Unauthorized.")
+		}
+		_ = bm.sendText(ctx, peer, "🔄 <b>Checking for updates from upstream repository...</b>")
+
+		res, err := update.PullUpstream(bm.config.UpstreamRepo, bm.config.UpstreamBranch, bm.config.GithubToken)
+		if err != nil {
+			return bm.sendText(ctx, peer, fmt.Sprintf("❌ <b>Update failed:</b> %s", err.Error()))
+		}
+
+		updateMsg := fmt.Sprintf("✅ <b>Update successful!</b>\n\n📌 <b>Commit ID:</b> <code>%s</code>\n💬 <b>Commit Message:</b> %s\n\n🔄 <i>Restarting bot process...</i>", res.CommitHash, res.CommitMessage)
+		_ = bm.sendText(ctx, peer, updateMsg)
+		time.Sleep(2 * time.Second)
+		update.RestartProcess()
+		return nil
+	case "/restart":
+		if !bm.isAdmin(userID) {
+			return bm.sendText(ctx, peer, "Unauthorized.")
+		}
+		_ = bm.sendText(ctx, peer, "🔄 <b>Restarting bot process...</b>")
+		time.Sleep(1 * time.Second)
+		update.RestartProcess()
+		return nil
 	}
 	return nil
 }

@@ -16,6 +16,9 @@ services:
       - MONGO_URI=mongodb://db:27101/filestore
       - OWNER_ID=${OWNER_ID}
       - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
+      - UPSTREAM_REPO=${UPSTREAM_REPO:-https://github.com/aquib4040/filestore.git}
+      - UPSTREAM_BRANCH=${UPSTREAM_BRANCH:-main}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
       - PORT=8080
       - AUTO_DEL=300
     depends_on:
