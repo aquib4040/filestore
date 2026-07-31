@@ -42,8 +42,8 @@ func PullUpstream(repo, branch, token string) (*UpdateResult, error) {
 	// Execute git commands
 	initCmd := exec.Command("sh", "-c", fmt.Sprintf(
 		"git init -q && "+
-			"git config --global user.email 'filestore@bot.local' && "+
-			"git config --global user.name 'filestore-bot' && "+
+			"git config --global user.email 'mdaquinjawed1106@gmail.com' && "+
+			"git config --global user.name 'aquib4040' && "+
 			"git add . && git commit -sm 'update' -q && "+
 			"git remote add origin %s && "+
 			"git fetch %s %s -q && "+
