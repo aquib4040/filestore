@@ -13,25 +13,18 @@ services:
       - API_ID=${API_ID}
       - API_HASH=${API_HASH}
       - BOT_TOKEN=${BOT_TOKEN}
-      - MONGO_URI=mongodb://db:27101/filestore
+      - MONGO_URI=${MONGO_URI}
+      - DB_NAME=${DB_NAME:-filestore}
       - OWNER_ID=${OWNER_ID}
+      - ADMINS=${ADMINS}
       - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
       - UPSTREAM_REPO=${UPSTREAM_REPO:-https://github.com/aquib4040/filestore.git}
       - UPSTREAM_BRANCH=${UPSTREAM_BRANCH:-main}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - PORT=8080
-      - AUTO_DEL=300
-    depends_on:
-      - db
-
-  db:
-    image: mongo:latest
-    container_name: go-filestore-mongodb
-    restart: always
-    ports:
-      - "27101:27017"
-    volumes:
-      - mongo_data:/data/db
-
-volumes:
-  mongo_data:
+      - PORT=${PORT:-8080}
+      - AUTO_DEL=${AUTO_DEL:-300}
+      - DISABLE_BTN=${DISABLE_BTN:-false}
+      - PROTECT=${PROTECT:-false}
+      - CLONE_LIMIT=${CLONE_LIMIT:-3}
+      - CLONE_ALLOW=${CLONE_ALLOW:-true}
+      - FQDN=${FQDN}
