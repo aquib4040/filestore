@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"strconv"
-	"strings"
 )
 
 type Config struct {
@@ -13,7 +12,6 @@ type Config struct {
 	MongoURI       string
 	DBName         string
 	OwnerID        int64
-	Admins         []int64
 	Port           string
 	AutoDel        int
 	DisableBtn     bool
@@ -36,9 +34,6 @@ func LoadConfig() (*Config, error) {
 	cloneLimit, _ := strconv.Atoi(getEnv("CLONE_LIMIT", "3"))
 	cloneAllow, _ := strconv.ParseBool(getEnv("CLONE_ALLOW", "true"))
 
-	// Parse ADMINS comma-separated list, always include owner
-	admins := parseAdmins(getEnv("ADMINS", ""), ownerID)
-
 	return &Config{
 		APIID:          apiID,
 		APIHash:        getEnv("API_HASH", ""),
@@ -46,7 +41,6 @@ func LoadConfig() (*Config, error) {
 		MongoURI:       getEnv("MONGO_URI", ""),
 		DBName:         getEnv("DB_NAME", "filestore"),
 		OwnerID:        ownerID,
-		Admins:         admins,
 		Port:           getEnv("PORT", "8080"),
 		AutoDel:        autoDel,
 		DisableBtn:     disableBtn,
@@ -66,18 +60,4 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
-}
-
-func parseAdmins(raw string, ownerID int64) []int64 {
-	admins := []int64{ownerID}
-	if raw == "" {
-		return admins
-	}
-	for _, s := range strings.Split(raw, ",") {
-		s = strings.TrimSpace(s)
-		if id, err := strconv.ParseInt(s, 10, 64); err == nil && id != ownerID {
-			admins = append(admins, id)
-		}
-	}
-	return admins
 }

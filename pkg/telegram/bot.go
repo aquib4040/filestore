@@ -33,6 +33,7 @@ type BotManager struct {
 	primaryDBID  int64
 	botUsername  string
 	uptime       time.Time
+	admins       []int64
 }
 
 func NewBotManager(cfg *config.Config, mongoDB *db.MongoDB, logger *zap.Logger) *BotManager {
@@ -322,6 +323,12 @@ func (bm *BotManager) refreshSettings(ctx context.Context) {
 	if err == nil {
 		bm.fsubChannels = fsubs
 	}
+
+	// Load Dynamic Admins from DB
+	dbAdmins, err := bm.mongo.GetAdminsList(ctx)
+	if err == nil {
+		bm.admins = dbAdmins
+	}
 }
 
 func hashToken(token string) string {
@@ -359,7 +366,7 @@ func (bm *BotManager) setMainBotCommands(ctx context.Context, client *telegram.C
 		Commands: defaultCmds,
 	})
 
-	// 2. Admin commands (for the main bot owner and admins)
+	// 2. Admin commands (for the main bot owner and dynamic admins)
 	adminCmds := []tg.BotCommand{
 		{Command: "start", Description: "Start the bot"},
 		{Command: "settings", Description: "Admin control panel"},
@@ -384,8 +391,12 @@ func (bm *BotManager) setMainBotCommands(ctx context.Context, client *telegram.C
 			tg.BotCommand{Command: "deletecloned", Description: "Delete clone bot instance"},
 		)
 	}
-	// Set admin commands for each admin
-	for _, adminID := range bm.config.Admins {
+	// Combine Owner ID and dynamic admins
+	allAdmins := append([]int64{bm.config.OwnerID}, bm.admins...)
+	for _, adminID := range allAdmins {
+		if adminID == 0 {
+			continue
+		}
 		adminPeer := &tg.InputPeerUser{UserID: adminID}
 		_, _ = api.BotsSetBotCommands(ctx, &tg.BotsSetBotCommandsRequest{
 			Scope:    &tg.BotCommandScopePeer{Peer: adminPeer},

@@ -640,6 +640,36 @@ func (bm *BotManager) sendDBSettings(ctx context.Context, peer tg.InputPeerClass
 	return bm.editMessage(ctx, peer, msgID, listBuilder.String(), NewInlineMarkup(rows))
 }
 
+func (bm *BotManager) sendAdminsSettings(ctx context.Context, peer tg.InputPeerClass, msgID int) error {
+	var listBuilder strings.Builder
+	listBuilder.WriteString(fmt.Sprintf("<blockquote>✦ %s ✦</blockquote>\n", ToSmallCaps("Admins Management")))
+	listBuilder.WriteString(fmt.Sprintf("• **Primary Owner:** <code>%d</code>\n", bm.config.OwnerID))
+
+	bm.mu.Lock()
+	admins := bm.admins
+	bm.mu.Unlock()
+
+	if len(admins) == 0 {
+		listBuilder.WriteString("\n_No additional admins configured._")
+	} else {
+		listBuilder.WriteString("\n<b>Extra Dynamic Admins:</b>\n")
+		for _, adminID := range admins {
+			listBuilder.WriteString(fmt.Sprintf("• <code>%d</code>\n", adminID))
+		}
+	}
+
+	rows := [][]tg.KeyboardButtonClass{
+		{
+			NewCallbackButtonWithStyle(ToSmallCaps("Add Admin"), "add_admin", styleGreen),
+			NewCallbackButtonWithStyle(ToSmallCaps("Remove Admin"), "rm_admin", styleGreen),
+		},
+		{
+			NewCallbackButtonWithStyle(ToSmallCaps("Back"), "settings", styleBlue),
+		},
+	}
+	return bm.editMessage(ctx, peer, msgID, listBuilder.String(), NewInlineMarkup(rows))
+}
+
 func (bm *BotManager) sendPhotosSettings(ctx context.Context, peer tg.InputPeerClass, msgID int) error {
 	msg := fmt.Sprintf("<blockquote>✦ %s ✦</blockquote>\nConfigure banner links for your bot start / force subscribe prompts:", ToSmallCaps("Photos/Media Settings"))
 
@@ -739,6 +769,8 @@ func (bm *BotManager) handleMainCallback(ctx context.Context, u *tg.UpdateBotCal
 		return bm.sendFSubSettings(ctx, peer, u.MsgID)
 	case "set_db":
 		return bm.sendDBSettings(ctx, peer, u.MsgID)
+	case "set_admins":
+		return bm.sendAdminsSettings(ctx, peer, u.MsgID)
 	case "set_photos":
 		return bm.sendPhotosSettings(ctx, peer, u.MsgID)
 	case "set_texts":
@@ -750,6 +782,10 @@ func (bm *BotManager) handleMainCallback(ctx context.Context, u *tg.UpdateBotCal
 		return bm.sendText(ctx, peer, fmt.Sprintf("Clone bot activation mode is now: **%t**", mode))
 
 	// Interactive prompts triggers (routed in background)
+	case "add_admin":
+		go bm.handleAddAdminPrompt(ctx, u.UserID)
+	case "rm_admin":
+		go bm.handleRemoveAdminPrompt(ctx, u.UserID)
 	case "add_fsub":
 		go bm.handleAddFSubPrompt(ctx, u.UserID)
 	case "rm_fsub":
@@ -975,12 +1011,84 @@ func (bm *BotManager) handleMainTextMessage(ctx context.Context, userID int64, m
 }
 
 func (bm *BotManager) isAdmin(userID int64) bool {
-	for _, id := range bm.config.Admins {
+	if userID == bm.config.OwnerID {
+		return true
+	}
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	for _, id := range bm.admins {
 		if id == userID {
 			return true
 		}
 	}
 	return false
+}
+
+func (bm *BotManager) handleAddAdminPrompt(ctx context.Context, userID int64) {
+	peer := &tg.InputPeerUser{UserID: userID}
+	_ = bm.sendText(ctx, peer, "<b>Send the User ID of the new Admin to add:</b>\n(e.g., <code>123456789</code>)")
+
+	resp, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	if err != nil || resp == "/cancel" {
+		_ = bm.sendText(ctx, peer, "Process cancelled.")
+		return
+	}
+
+	newAdminID, _ := strconv.ParseInt(strings.TrimSpace(resp), 10, 64)
+	if newAdminID == 0 {
+		_ = bm.sendText(ctx, peer, "Invalid User ID.")
+		return
+	}
+
+	currentAdmins, _ := bm.mongo.GetAdminsList(ctx)
+	for _, id := range currentAdmins {
+		if id == newAdminID {
+			_ = bm.sendText(ctx, peer, fmt.Sprintf("User <code>%d</code> is already an Admin.", newAdminID))
+			return
+		}
+	}
+
+	newAdmins := append(currentAdmins, newAdminID)
+	_ = bm.mongo.SetAdminsList(ctx, newAdmins)
+	bm.refreshSettings(ctx)
+	_ = bm.sendText(ctx, peer, fmt.Sprintf("✅ User <code>%d</code> added as an Admin successfully!", newAdminID))
+}
+
+func (bm *BotManager) handleRemoveAdminPrompt(ctx context.Context, userID int64) {
+	peer := &tg.InputPeerUser{UserID: userID}
+	_ = bm.sendText(ctx, peer, "<b>Send the User ID of the Admin to remove:</b>")
+
+	resp, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	if err != nil || resp == "/cancel" {
+		_ = bm.sendText(ctx, peer, "Process cancelled.")
+		return
+	}
+
+	targetID, _ := strconv.ParseInt(strings.TrimSpace(resp), 10, 64)
+	if targetID == 0 {
+		_ = bm.sendText(ctx, peer, "Invalid User ID.")
+		return
+	}
+
+	currentAdmins, _ := bm.mongo.GetAdminsList(ctx)
+	var updated []int64
+	found := false
+	for _, id := range currentAdmins {
+		if id == targetID {
+			found = true
+		} else {
+			updated = append(updated, id)
+		}
+	}
+
+	if !found {
+		_ = bm.sendText(ctx, peer, fmt.Sprintf("User <code>%d</code> is not in the extra admins list.", targetID))
+		return
+	}
+
+	_ = bm.mongo.SetAdminsList(ctx, updated)
+	bm.refreshSettings(ctx)
+	_ = bm.sendText(ctx, peer, fmt.Sprintf("✅ User <code>%d</code> removed from extra admins list.", targetID))
 }
 
 // Inline messengers
