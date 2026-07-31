@@ -57,8 +57,8 @@ func PullUpstream(repo, branch, token string) (*UpdateResult, error) {
 		// Fallback for Windows cmd environment if sh is not available
 		winCmd := exec.Command("cmd", "/c", fmt.Sprintf(
 			"git init -q && "+
-				"git config --global user.email \"filestore@bot.local\" && "+
-				"git config --global user.name \"filestore-bot\" && "+
+				"git config --global user.email \"mdaquibjawed1006@gmail.com\" && "+
+				"git config --global user.name \"aquib4040\" && "+
 				"git add . && git commit -sm \"update\" -q && "+
 				"git remote add origin %s && "+
 				"git fetch %s %s -q && "+
