@@ -784,6 +784,46 @@ func (bm *BotManager) handleMainCallback(ctx context.Context, u *tg.UpdateBotCal
 		_ = bm.mongo.UpdateUserSettings(ctx, u.UserID, userPrefs.AutoDel, !userPrefs.Protect)
 		return bm.sendMySettingsPanel(ctx, peer, u.UserID, u.MsgID)
 
+	case "help":
+		helpText := ""
+		var rows [][]tg.KeyboardButtonClass
+		if bm.isAdmin(u.UserID) {
+			helpText = "<b>⛩️ Admin Help Menu ⛩️</b>\n\n" +
+				"• /settings - Open settings dashboard\n" +
+				"• /stats - View database and server statistics\n" +
+				"• /users - View total registered users count\n" +
+				"• /genlink - Generate custom single-file links\n" +
+				"• /batch - Generate batch range links\n" +
+				"• /logs - Retrieve the server log file (Owner only)\n" +
+				"• /ban &lt;user_id&gt; - Ban a user\n" +
+				"• /unban &lt;user_id&gt; - Unban a user\n\n" +
+				"<b>👥 User Commands:</b>\n" +
+				"• /mysettings - Customize auto-delete and protection settings"
+		} else {
+			helpText = "<b>❔ Help Menu ❔</b>\n\n" +
+				"• Send files to get download links (Admins only).\n" +
+				"• Click shared links to fetch stored files.\n" +
+				"• Use /mysettings to customize your personal preferences (auto-delete duration and download protection)."
+		}
+		rows = append(rows, []tg.KeyboardButtonClass{
+			NewCallbackButtonWithStyle("« Back", "my_close_help", styleGreen),
+		})
+		return bm.editMessage(ctx, peer, u.MsgID, helpText, NewInlineMarkup(rows))
+
+	case "my_close_help":
+		startMsg := fmt.Sprintf("<b>Hey <a href=\"tg://user?id=%d\">User</a>!</b>\n\n<blockquote>I am File Store Bot. I can store files in private channels and share download links.</blockquote>", u.UserID)
+		var rows [][]tg.KeyboardButtonClass
+		if bm.isAdmin(u.UserID) {
+			rows = append(rows, []tg.KeyboardButtonClass{
+				NewCallbackButtonWithStyle("⛩️ Settings ⛩️", "settings", styleGreen),
+			})
+		}
+		rows = append(rows, []tg.KeyboardButtonClass{
+			NewCallbackButtonWithStyle("Help", "help", styleGreen),
+			NewCallbackButtonWithStyle("Close", "close", styleRed),
+		})
+		return bm.editMessage(ctx, peer, u.MsgID, startMsg, NewInlineMarkup(rows))
+
 	case "close":
 		_, err := bm.primary.API().MessagesDeleteMessages(ctx, &tg.MessagesDeleteMessagesRequest{
 			ID:     []int{u.MsgID},
