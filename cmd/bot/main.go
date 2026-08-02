@@ -16,6 +16,8 @@ import (
 	"filestore/pkg/telegram"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	_ "time/tzdata"
 )
 
 func init() {
@@ -36,6 +38,14 @@ func main() {
 	// Initialize logger
 	cfgLog := zap.NewDevelopmentConfig()
 	cfgLog.DisableStacktrace = true
+
+	loc, err := time.LoadLocation("Asia/Kolkata")
+	if err == nil {
+		cfgLog.EncoderConfig.EncodeTime = func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+			enc.AppendString(t.In(loc).Format("2006-01-02T15:04:05.000-0700"))
+		}
+	}
+
 	logger, _ := cfgLog.Build()
 	defer logger.Sync()
 
