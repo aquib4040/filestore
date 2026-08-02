@@ -14,28 +14,32 @@ import (
 	"filestore/pkg/shortener"
 	"filestore/pkg/update"
 
+	"github.com/gotd/td/telegram/message/entity"
+	"github.com/gotd/td/telegram/message/html"
+	"github.com/gotd/td/telegram/message/styling"
+	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 	"go.uber.org/zap"
 )
 
 var (
-	styleGreen interface{} = nil
-	styleRed   interface{} = nil
-	styleBlue  interface{} = nil
+	styleGreen = tg.KeyboardButtonStyle{BgSuccess: true}
+	styleRed   = tg.KeyboardButtonStyle{BgDanger: true}
+	styleBlue  = tg.KeyboardButtonStyle{BgPrimary: true}
 )
 
-func (bm *BotManager) handleMainCommand(ctx context.Context, userID int64, cmd string, args []string, msg *tg.Message) error {
+func (bm *BotManager) handleMainCommand(ctx context.Context, userID int64, senderUser *tg.User, cmd string, args []string, msg *tg.Message) error {
 	peer := &tg.InputPeerUser{UserID: userID}
 
 	switch cmd {
 	case "/start":
-		return bm.handleStart(ctx, userID, args, msg)
+		return bm.handleStart(ctx, userID, senderUser, args, msg)
 	case "/settings":
 		if !bm.isAdmin(userID) {
 			return bm.sendText(ctx, peer, "Bakka! You are not my Senpai!")
 		}
-		return bm.sendSettingsPanel(ctx, peer)
+		return bm.sendSettingsPanel(ctx, peer, 0)
 	case "/mysettings":
 		return bm.sendMySettingsPanel(ctx, peer, userID, 0)
 	case "/clone":
@@ -214,7 +218,7 @@ func (bm *BotManager) handleMainCommand(ctx context.Context, userID int64, cmd s
 	return nil
 }
 
-func (bm *BotManager) handleStart(ctx context.Context, userID int64, args []string, msg *tg.Message) error {
+func (bm *BotManager) handleStart(ctx context.Context, userID int64, senderUser *tg.User, args []string, _ *tg.Message) error {
 	peer := &tg.InputPeerUser{UserID: userID}
 
 	// Check if banned
@@ -228,7 +232,20 @@ func (bm *BotManager) handleStart(ctx context.Context, userID int64, args []stri
 
 	// Normal start message if no argument
 	if len(args) == 0 {
-		startMsg := fmt.Sprintf("<b>Hey %d!</b>\n\n<blockquote>I am File Store Bot. I can store files in private channels and share download links.</blockquote>", userID)
+		var name string
+		if senderUser != nil {
+			name = senderUser.FirstName
+			if senderUser.LastName != "" {
+				name += " " + senderUser.LastName
+			}
+			if name == "" && senderUser.Username != "" {
+				name = senderUser.Username
+			}
+		}
+		if name == "" {
+			name = "User"
+		}
+		startMsg := fmt.Sprintf("<b>Hey <a href=\"tg://user?id=%d\">%s</a>!</b>\n\n<blockquote>I am File Store Bot. I can store files in private channels and share download links.</blockquote>", userID, name)
 		
 		var rows [][]tg.KeyboardButtonClass
 		if bm.isAdmin(userID) {
@@ -352,7 +369,7 @@ func (bm *BotManager) handleStart(ctx context.Context, userID int64, args []stri
 
 	// Copy messages to user
 	api := bm.primary.API()
-	inputChannel := &tg.InputPeerChannel{ChannelID: targetChannelID}
+	inputChannel, _ := bm.getChannelPeer(ctx, nil, targetChannelID)
 
 	// Fetch personal preferences
 	userPrefs, _ := bm.mongo.GetUserSettings(ctx, userID)
@@ -373,9 +390,10 @@ func (bm *BotManager) handleStart(ctx context.Context, userID int64, args []stri
 			WithMyScore: false,
 			DropAuthor:  true, // makes copy
 			Noforwards:  protectContent,
+			RandomID:    []int64{getRandomID()},
 		})
 		if err != nil {
-			bm.logger.Warn("Failed to forward/copy message", zap.Int("msg_id", msgID), zap.Error(err))
+			bm.logger.Warn("Failed to forward/copy message", zap.Int("msg_id", msgID), zap.String("error", err.Error()))
 		} else if autoDelDelay > 0 {
 			sentMsgIDs := getSentMsgIDs(updates)
 			if len(sentMsgIDs) > 0 {
@@ -473,7 +491,7 @@ func (bm *BotManager) handleGenLink(ctx context.Context, userID int64) error {
 		return err
 	}
 
-	msgID, _ := strconv.Atoi(idStr)
+	msgID := extractMessageID(idStr)
 	if msgID <= 0 {
 		return bm.sendText(ctx, peer, "Invalid message ID.")
 	}
@@ -485,7 +503,7 @@ func (bm *BotManager) handleGenLink(ctx context.Context, userID int64) error {
 	}
 	link := fmt.Sprintf("https://t.me/%s?start=%s", username, payload)
 
-	return bm.sendText(ctx, peer, fmt.Sprintf("<b>Here is your file link:</b>\n\n<code>%s</code>", link))
+	return bm.sendText(ctx, peer, fmt.Sprintf("<b>Here is your file link:</b>\n\n%s", link))
 }
 
 func (bm *BotManager) handleBatchLink(ctx context.Context, userID int64) error {
@@ -496,14 +514,14 @@ func (bm *BotManager) handleBatchLink(ctx context.Context, userID int64) error {
 	if err != nil {
 		return err
 	}
-	startID, _ := strconv.Atoi(startStr)
+	startID := extractMessageID(startStr)
 
 	_ = bm.sendText(ctx, peer, "Send Last Message ID:")
 	endStr, err := bm.state.Listen(ctx, userID, 60*time.Second)
 	if err != nil {
 		return err
 	}
-	endID, _ := strconv.Atoi(endStr)
+	endID := extractMessageID(endStr)
 
 	if startID <= 0 || endID <= 0 {
 		return bm.sendText(ctx, peer, "Invalid message range IDs.")
@@ -516,10 +534,10 @@ func (bm *BotManager) handleBatchLink(ctx context.Context, userID int64) error {
 	}
 	link := fmt.Sprintf("https://t.me/%s?start=%s", username, payload)
 
-	return bm.sendText(ctx, peer, fmt.Sprintf("<b>Here is your range batch link:</b>\n\n<code>%s</code>", link))
+	return bm.sendText(ctx, peer, fmt.Sprintf("<b>Here is your range batch link:</b>\n\n%s", link))
 }
 
-func (bm *BotManager) sendSettingsPanel(ctx context.Context, peer tg.InputPeerClass) error {
+func (bm *BotManager) sendSettingsPanel(ctx context.Context, peer tg.InputPeerClass, editMsgID int) error {
 	msg := fmt.Sprintf("<blockquote>✦ %s ✦</blockquote>\n", ToSmallCaps("Settings Dashboard")) +
 		"›› **FSub Channels:** " + strconv.Itoa(len(bm.fsubChannels)) + "\n" +
 		"›› **DB Channels:** " + strconv.Itoa(len(bm.dbChannels)) + "\n" +
@@ -552,6 +570,9 @@ func (bm *BotManager) sendSettingsPanel(ctx context.Context, peer tg.InputPeerCl
 		NewCallbackButtonWithStyle(ToSmallCaps("Next >>"), "settings_page_2", styleGreen),
 	})
 
+	if editMsgID > 0 {
+		return bm.editMessage(ctx, peer, editMsgID, msg, NewInlineMarkup(rows))
+	}
 	return bm.sendTextWithMarkup(ctx, peer, msg, NewInlineMarkup(rows))
 }
 
@@ -762,7 +783,7 @@ func (bm *BotManager) handleMainCallback(ctx context.Context, u *tg.UpdateBotCal
 		})
 		return err
 	case "settings":
-		return bm.sendSettingsPanel(ctx, peer)
+		return bm.sendSettingsPanel(ctx, peer, u.MsgID)
 	case "settings_page_2":
 		return bm.sendSettingsPage2(ctx, peer, u.MsgID)
 	case "set_fsub":
@@ -778,47 +799,53 @@ func (bm *BotManager) handleMainCallback(ctx context.Context, u *tg.UpdateBotCal
 	case "set_shortener":
 		return bm.sendShortenerSettings(ctx, peer, u.MsgID)
 	case "toggle_clone":
-		mode := bm.ToggleCloneMode(ctx)
-		return bm.sendText(ctx, peer, fmt.Sprintf("Clone bot activation mode is now: **%t**", mode))
+		_ = bm.ToggleCloneMode(ctx)
+		return bm.sendSettingsPanel(ctx, peer, u.MsgID)
 
 	// Interactive prompts triggers (routed in background)
 	case "add_admin":
-		go bm.handleAddAdminPrompt(ctx, u.UserID)
+		go bm.handleAddAdminPrompt(ctx, u.UserID, u.MsgID)
 	case "rm_admin":
-		go bm.handleRemoveAdminPrompt(ctx, u.UserID)
+		go bm.handleRemoveAdminPrompt(ctx, u.UserID, u.MsgID)
 	case "add_fsub":
-		go bm.handleAddFSubPrompt(ctx, u.UserID)
+		go bm.handleAddFSubPrompt(ctx, u.UserID, u.MsgID)
 	case "rm_fsub":
-		go bm.handleRemoveFSubPrompt(ctx, u.UserID)
+		go bm.handleRemoveFSubPrompt(ctx, u.UserID, u.MsgID)
 	case "add_db_ch":
-		go bm.handleAddDBChannelPrompt(ctx, u.UserID)
+		go bm.handleAddDBChannelPrompt(ctx, u.UserID, u.MsgID)
 	case "rm_db_ch":
-		go bm.handleRemoveDBChannelPrompt(ctx, u.UserID)
+		go bm.handleRemoveDBChannelPrompt(ctx, u.UserID, u.MsgID)
 	case "set_prim_db":
-		go bm.handleSetPrimaryDBPrompt(ctx, u.UserID)
+		go bm.handleSetPrimaryDBPrompt(ctx, u.UserID, u.MsgID)
 	case "toggle_db_act":
-		go bm.handleToggleDBChannelPrompt(ctx, u.UserID)
+		go bm.handleToggleDBChannelPrompt(ctx, u.UserID, u.MsgID)
 	case "set_autodel":
-		go bm.handleSetAutoDeletePrompt(ctx, u.UserID)
+		go bm.handleSetAutoDeletePrompt(ctx, u.UserID, u.MsgID)
 	}
 	return nil
 }
 
 // Prompt Handlers (client.listen equivalents running in goroutines)
 
-func (bm *BotManager) handleAddFSubPrompt(ctx context.Context, userID int64) {
+func (bm *BotManager) handleAddFSubPrompt(ctx context.Context, userID int64, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendText(ctx, peer, "<b>Send channel ID, request boolean (yes/no), and timer (minutes) separated by a space:</b>\nExample: `-100123456789 yes 5`")
+	promptID, _ := bm.sendTextGetID(ctx, peer, "<b>Send channel ID, request boolean (yes/no), and timer (minutes) separated by a space:</b>\nExample: `-100123456789 yes 5`")
 
 	resp, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, nil, []int{promptID, userInputMsgID})
+
 	if err != nil {
-		_ = bm.sendText(ctx, peer, "Timeout or cancelled.")
+		_ = bm.sendFSubSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	parts := strings.Fields(resp)
 	if len(parts) < 3 {
-		_ = bm.sendText(ctx, peer, "Invalid format. Must specify ID, request, and timer.")
+		errID, _ := bm.sendTextGetID(ctx, peer, "❌ <b>Invalid format.</b> Must specify ID, request, and timer.")
+		time.Sleep(3 * time.Second)
+		bm.deleteMessages(ctx, nil, []int{errID})
+		_ = bm.sendFSubSettings(ctx, peer, menuMsgID)
 		return
 	}
 
@@ -836,42 +863,60 @@ func (bm *BotManager) handleAddFSubPrompt(ctx context.Context, userID int64) {
 
 	err = bm.mongo.AddFSubChannel(ctx, ch)
 	if err != nil {
-		_ = bm.sendText(ctx, peer, fmt.Sprintf("Failed to save channel: %s", err.Error()))
+		errID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("❌ <b>Failed to save channel:</b> %s", err.Error()))
+		time.Sleep(3 * time.Second)
+		bm.deleteMessages(ctx, nil, []int{errID})
+		_ = bm.sendFSubSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	bm.refreshSettings(ctx)
-	_ = bm.sendText(ctx, peer, "FSub channel added successfully!")
+	successID, _ := bm.sendTextGetID(ctx, peer, "✅ <b>FSub channel added successfully!</b>")
+	time.Sleep(2 * time.Second)
+	bm.deleteMessages(ctx, nil, []int{successID})
+	_ = bm.sendFSubSettings(ctx, peer, menuMsgID)
 }
 
-func (bm *BotManager) handleRemoveFSubPrompt(ctx context.Context, userID int64) {
+func (bm *BotManager) handleRemoveFSubPrompt(ctx context.Context, userID int64, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendText(ctx, peer, "<b>Send the Channel ID you want to remove:</b>")
+	promptID, _ := bm.sendTextGetID(ctx, peer, "<b>Send the Channel ID you want to remove:</b>")
 
 	resp, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, nil, []int{promptID, userInputMsgID})
+
 	if err != nil {
-		_ = bm.sendText(ctx, peer, "Timeout or cancelled.")
+		_ = bm.sendFSubSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	chID, _ := strconv.ParseInt(strings.TrimSpace(resp), 10, 64)
 	err = bm.mongo.RemoveFSubChannel(ctx, chID)
 	if err != nil {
-		_ = bm.sendText(ctx, peer, fmt.Sprintf("Failed to remove channel: %s", err.Error()))
+		errID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("❌ <b>Failed to remove channel:</b> %s", err.Error()))
+		time.Sleep(3 * time.Second)
+		bm.deleteMessages(ctx, nil, []int{errID})
+		_ = bm.sendFSubSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	bm.refreshSettings(ctx)
-	_ = bm.sendText(ctx, peer, "FSub channel removed successfully!")
+	successID, _ := bm.sendTextGetID(ctx, peer, "✅ <b>FSub channel removed successfully!</b>")
+	time.Sleep(2 * time.Second)
+	bm.deleteMessages(ctx, nil, []int{successID})
+	_ = bm.sendFSubSettings(ctx, peer, menuMsgID)
 }
 
-func (bm *BotManager) handleAddDBChannelPrompt(ctx context.Context, userID int64) {
+func (bm *BotManager) handleAddDBChannelPrompt(ctx context.Context, userID int64, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendText(ctx, peer, "<b>Send the Database Channel ID you want to add:</b>\nExample: `-100123456789`")
+	promptID, _ := bm.sendTextGetID(ctx, peer, "<b>Send the Database Channel ID you want to add:</b>\nExample: `-100123456789`")
 
 	resp, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, nil, []int{promptID, userInputMsgID})
+
 	if err != nil {
-		_ = bm.sendText(ctx, peer, "Timeout or cancelled.")
+		_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 		return
 	}
 
@@ -885,109 +930,161 @@ func (bm *BotManager) handleAddDBChannelPrompt(ctx context.Context, userID int64
 
 	err = bm.mongo.AddDBChannel(ctx, ch)
 	if err != nil {
-		_ = bm.sendText(ctx, peer, fmt.Sprintf("Failed to save DB channel: %s", err.Error()))
+		errID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("❌ <b>Failed to save DB channel:</b> %s", err.Error()))
+		time.Sleep(3 * time.Second)
+		bm.deleteMessages(ctx, nil, []int{errID})
+		_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	bm.refreshSettings(ctx)
-	_ = bm.sendText(ctx, peer, "Database channel added successfully!")
+	successID, _ := bm.sendTextGetID(ctx, peer, "✅ <b>Database channel added successfully!</b>")
+	time.Sleep(2 * time.Second)
+	bm.deleteMessages(ctx, nil, []int{successID})
+	_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 }
 
-func (bm *BotManager) handleRemoveDBChannelPrompt(ctx context.Context, userID int64) {
+func (bm *BotManager) handleRemoveDBChannelPrompt(ctx context.Context, userID int64, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendText(ctx, peer, "<b>Send the DB Channel ID you want to remove:</b>")
+	promptID, _ := bm.sendTextGetID(ctx, peer, "<b>Send the DB Channel ID you want to remove:</b>")
 
 	resp, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, nil, []int{promptID, userInputMsgID})
+
 	if err != nil {
-		_ = bm.sendText(ctx, peer, "Timeout or cancelled.")
+		_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	chID, _ := strconv.ParseInt(strings.TrimSpace(resp), 10, 64)
 	err = bm.mongo.RemoveDBChannel(ctx, chID)
 	if err != nil {
-		_ = bm.sendText(ctx, peer, fmt.Sprintf("Failed to remove DB channel: %s", err.Error()))
+		errID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("❌ <b>Failed to remove DB channel:</b> %s", err.Error()))
+		time.Sleep(3 * time.Second)
+		bm.deleteMessages(ctx, nil, []int{errID})
+		_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	bm.refreshSettings(ctx)
-	_ = bm.sendText(ctx, peer, "Database channel removed successfully!")
+	successID, _ := bm.sendTextGetID(ctx, peer, "✅ <b>Database channel removed successfully!</b>")
+	time.Sleep(2 * time.Second)
+	bm.deleteMessages(ctx, nil, []int{successID})
+	_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 }
 
-func (bm *BotManager) handleSetPrimaryDBPrompt(ctx context.Context, userID int64) {
+func (bm *BotManager) handleSetPrimaryDBPrompt(ctx context.Context, userID int64, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendText(ctx, peer, "<b>Send the DB Channel ID you want to set as primary:</b>")
+	promptID, _ := bm.sendTextGetID(ctx, peer, "<b>Send the DB Channel ID you want to set as primary:</b>")
 
 	resp, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, nil, []int{promptID, userInputMsgID})
+
 	if err != nil {
-		_ = bm.sendText(ctx, peer, "Timeout or cancelled.")
+		_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	chID, _ := strconv.ParseInt(strings.TrimSpace(resp), 10, 64)
 	err = bm.mongo.SetPrimaryDBChannel(ctx, chID)
 	if err != nil {
-		_ = bm.sendText(ctx, peer, fmt.Sprintf("Failed to set primary DB channel: %s", err.Error()))
+		errID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("❌ <b>Failed to set primary DB channel:</b> %s", err.Error()))
+		time.Sleep(3 * time.Second)
+		bm.deleteMessages(ctx, nil, []int{errID})
+		_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	bm.refreshSettings(ctx)
-	_ = bm.sendText(ctx, peer, "Primary database channel updated successfully!")
+	successID, _ := bm.sendTextGetID(ctx, peer, "✅ <b>Primary database channel updated successfully!</b>")
+	time.Sleep(2 * time.Second)
+	bm.deleteMessages(ctx, nil, []int{successID})
+	_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 }
 
-func (bm *BotManager) handleToggleDBChannelPrompt(ctx context.Context, userID int64) {
+func (bm *BotManager) handleToggleDBChannelPrompt(ctx context.Context, userID int64, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendText(ctx, peer, "<b>Send the DB Channel ID you want to toggle Active/Inactive:</b>")
+	promptID, _ := bm.sendTextGetID(ctx, peer, "<b>Send the DB Channel ID you want to toggle Active/Inactive:</b>")
 
 	resp, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, nil, []int{promptID, userInputMsgID})
+
 	if err != nil {
-		_ = bm.sendText(ctx, peer, "Timeout or cancelled.")
+		_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	chID, _ := strconv.ParseInt(strings.TrimSpace(resp), 10, 64)
 	newStatus, err := bm.mongo.ToggleDBChannelStatus(ctx, chID)
 	if err != nil {
-		_ = bm.sendText(ctx, peer, fmt.Sprintf("Failed to toggle DB channel status: %s", err.Error()))
+		errID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("❌ <b>Failed to toggle DB channel status:</b> %s", err.Error()))
+		time.Sleep(3 * time.Second)
+		bm.deleteMessages(ctx, nil, []int{errID})
+		_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	bm.refreshSettings(ctx)
-	_ = bm.sendText(ctx, peer, fmt.Sprintf("Database channel status toggled! New status active = **%t**", newStatus))
+	successID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("✅ <b>Database channel status toggled!</b> New status active = **%t**", newStatus))
+	time.Sleep(2 * time.Second)
+	bm.deleteMessages(ctx, nil, []int{successID})
+	_ = bm.sendDBSettings(ctx, peer, menuMsgID)
 }
 
-func (bm *BotManager) handleSetAutoDeletePrompt(ctx context.Context, userID int64) {
+func (bm *BotManager) handleSetAutoDeletePrompt(ctx context.Context, userID int64, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendText(ctx, peer, "<b>Send the auto delete delay in seconds:</b>")
+	promptID, _ := bm.sendTextGetID(ctx, peer, "<b>Send the auto delete delay in seconds:</b>")
 
 	resp, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, nil, []int{promptID, userInputMsgID})
+
 	if err != nil {
-		_ = bm.sendText(ctx, peer, "Timeout or cancelled.")
+		_ = bm.sendSettingsPanel(ctx, peer, menuMsgID)
 		return
 	}
 
 	val, err := strconv.Atoi(strings.TrimSpace(resp))
 	if err != nil || val < 0 {
-		_ = bm.sendText(ctx, peer, "Invalid number.")
+		errID, _ := bm.sendTextGetID(ctx, peer, "❌ <b>Invalid number.</b>")
+		time.Sleep(3 * time.Second)
+		bm.deleteMessages(ctx, nil, []int{errID})
+		_ = bm.sendSettingsPanel(ctx, peer, menuMsgID)
 		return
 	}
 
 	bm.config.AutoDel = val
-	_ = bm.sendText(ctx, peer, fmt.Sprintf("Auto delete delay successfully set to **%d** seconds!", val))
+	successID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("✅ <b>Auto delete delay successfully set to %d seconds!</b>", val))
+	time.Sleep(2 * time.Second)
+	bm.deleteMessages(ctx, nil, []int{successID})
+	_ = bm.sendSettingsPanel(ctx, peer, menuMsgID)
 }
 
 func (bm *BotManager) handleMainTextMessage(ctx context.Context, userID int64, msg *tg.Message) error {
 	peer := &tg.InputPeerUser{UserID: userID}
 
+	bm.logger.Info("handleMainTextMessage received",
+		zap.Int64("userID", userID),
+		zap.Int64("ownerID", bm.config.OwnerID),
+		zap.Bool("isAdmin", bm.isAdmin(userID)),
+		zap.Bool("hasMedia", msg.Media != nil),
+		zap.Int64("primaryDBID", bm.primaryDBID),
+	)
+
 	// If admin sends/forwards a file, auto-generate download link
 	if bm.isAdmin(userID) && msg.Media != nil {
 		// Forward the file to the primary DB channel first
 		if bm.primaryDBID != 0 {
-			dbPeer := &tg.InputPeerChannel{ChannelID: bm.primaryDBID}
+			dbPeer, _ := bm.getChannelPeer(ctx, nil, bm.primaryDBID)
 			updates, err := bm.primary.API().MessagesForwardMessages(ctx, &tg.MessagesForwardMessagesRequest{
-				FromPeer: peer,
-				ID:       []int{msg.ID},
-				ToPeer:   dbPeer,
+				FromPeer:   peer,
+				ID:         []int{msg.ID},
+				ToPeer:     dbPeer,
+				DropAuthor: true,
+				RandomID:   []int64{getRandomID()},
 			})
 			if err == nil {
 				sentIDs := getSentMsgIDs(updates)
@@ -999,10 +1096,10 @@ func (bm *BotManager) handleMainTextMessage(ctx context.Context, userID int64, m
 						username = "your_bot"
 					}
 					link := fmt.Sprintf("https://t.me/%s?start=%s", username, payload)
-					return bm.sendText(ctx, peer, fmt.Sprintf("<b>File stored! Here is your link:</b>\n\n<code>%s</code>", link))
+					return bm.sendText(ctx, peer, fmt.Sprintf("<b>File stored! Here is your link:</b>\n\n%s", link))
 				}
 			} else {
-				bm.logger.Warn("Failed to forward file to DB channel", zap.Error(err))
+				bm.logger.Warn("Failed to forward file to DB channel", zap.String("error", err.Error()))
 			}
 		}
 	}
@@ -1024,26 +1121,35 @@ func (bm *BotManager) isAdmin(userID int64) bool {
 	return false
 }
 
-func (bm *BotManager) handleAddAdminPrompt(ctx context.Context, userID int64) {
+func (bm *BotManager) handleAddAdminPrompt(ctx context.Context, userID int64, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendText(ctx, peer, "<b>Send the User ID of the new Admin to add:</b>\n(e.g., <code>123456789</code>)")
+	promptID, _ := bm.sendTextGetID(ctx, peer, "<b>Send the User ID of the new Admin to add:</b>\n(e.g., <code>123456789</code>)")
 
 	resp, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, nil, []int{promptID, userInputMsgID})
+
 	if err != nil || resp == "/cancel" {
-		_ = bm.sendText(ctx, peer, "Process cancelled.")
+		_ = bm.sendAdminsSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	newAdminID, _ := strconv.ParseInt(strings.TrimSpace(resp), 10, 64)
 	if newAdminID == 0 {
-		_ = bm.sendText(ctx, peer, "Invalid User ID.")
+		errID, _ := bm.sendTextGetID(ctx, peer, "❌ <b>Invalid User ID.</b>")
+		time.Sleep(3 * time.Second)
+		bm.deleteMessages(ctx, nil, []int{errID})
+		_ = bm.sendAdminsSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	currentAdmins, _ := bm.mongo.GetAdminsList(ctx)
 	for _, id := range currentAdmins {
 		if id == newAdminID {
-			_ = bm.sendText(ctx, peer, fmt.Sprintf("User <code>%d</code> is already an Admin.", newAdminID))
+			errID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("❌ User <code>%d</code> is already an Admin.", newAdminID))
+			time.Sleep(3 * time.Second)
+			bm.deleteMessages(ctx, nil, []int{errID})
+			_ = bm.sendAdminsSettings(ctx, peer, menuMsgID)
 			return
 		}
 	}
@@ -1051,22 +1157,31 @@ func (bm *BotManager) handleAddAdminPrompt(ctx context.Context, userID int64) {
 	newAdmins := append(currentAdmins, newAdminID)
 	_ = bm.mongo.SetAdminsList(ctx, newAdmins)
 	bm.refreshSettings(ctx)
-	_ = bm.sendText(ctx, peer, fmt.Sprintf("✅ User <code>%d</code> added as an Admin successfully!", newAdminID))
+	successID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("✅ User <code>%d</code> added as an Admin successfully!", newAdminID))
+	time.Sleep(2 * time.Second)
+	bm.deleteMessages(ctx, nil, []int{successID})
+	_ = bm.sendAdminsSettings(ctx, peer, menuMsgID)
 }
 
-func (bm *BotManager) handleRemoveAdminPrompt(ctx context.Context, userID int64) {
+func (bm *BotManager) handleRemoveAdminPrompt(ctx context.Context, userID int64, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendText(ctx, peer, "<b>Send the User ID of the Admin to remove:</b>")
+	promptID, _ := bm.sendTextGetID(ctx, peer, "<b>Send the User ID of the Admin to remove:</b>")
 
 	resp, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, nil, []int{promptID, userInputMsgID})
+
 	if err != nil || resp == "/cancel" {
-		_ = bm.sendText(ctx, peer, "Process cancelled.")
+		_ = bm.sendAdminsSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	targetID, _ := strconv.ParseInt(strings.TrimSpace(resp), 10, 64)
 	if targetID == 0 {
-		_ = bm.sendText(ctx, peer, "Invalid User ID.")
+		errID, _ := bm.sendTextGetID(ctx, peer, "❌ <b>Invalid User ID.</b>")
+		time.Sleep(3 * time.Second)
+		bm.deleteMessages(ctx, nil, []int{errID})
+		_ = bm.sendAdminsSettings(ctx, peer, menuMsgID)
 		return
 	}
 
@@ -1082,30 +1197,195 @@ func (bm *BotManager) handleRemoveAdminPrompt(ctx context.Context, userID int64)
 	}
 
 	if !found {
-		_ = bm.sendText(ctx, peer, fmt.Sprintf("User <code>%d</code> is not in the extra admins list.", targetID))
+		errID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("❌ User <code>%d</code> is not in the extra admins list.", targetID))
+		time.Sleep(3 * time.Second)
+		bm.deleteMessages(ctx, nil, []int{errID})
+		_ = bm.sendAdminsSettings(ctx, peer, menuMsgID)
 		return
 	}
 
 	_ = bm.mongo.SetAdminsList(ctx, updated)
 	bm.refreshSettings(ctx)
-	_ = bm.sendText(ctx, peer, fmt.Sprintf("✅ User <code>%d</code> removed from extra admins list.", targetID))
+	successID, _ := bm.sendTextGetID(ctx, peer, fmt.Sprintf("✅ User <code>%d</code> removed from extra admins list.", targetID))
+	time.Sleep(2 * time.Second)
+	bm.deleteMessages(ctx, nil, []int{successID})
+	_ = bm.sendAdminsSettings(ctx, peer, menuMsgID)
+}
+
+func getRawChannelID(id int64) int64 {
+	idStr := strconv.FormatInt(id, 10)
+	if strings.HasPrefix(idStr, "-100") {
+		raw, _ := strconv.ParseInt(idStr[4:], 10, 64)
+		return raw
+	}
+	if id < 0 {
+		return -id
+	}
+	return id
+}
+
+func (bm *BotManager) getChannelPeer(ctx context.Context, client *telegram.Client, channelID int64) (tg.InputPeerClass, error) {
+	rawID := getRawChannelID(channelID)
+
+	bm.mu.Lock()
+	if bm.channelHashes == nil {
+		bm.channelHashes = make(map[int64]int64)
+	}
+	hash, found := bm.channelHashes[rawID]
+	bm.mu.Unlock()
+
+	if found && hash != 0 {
+		return &tg.InputPeerChannel{
+			ChannelID:  rawID,
+			AccessHash: hash,
+		}, nil
+	}
+
+	var api *tg.Client
+	if client != nil {
+		api = client.API()
+	} else {
+		api = bm.primary.API()
+	}
+
+	// Resolve channel dynamically using ChannelsGetChannels with AccessHash: 0
+	resCh, err := api.ChannelsGetChannels(ctx, []tg.InputChannelClass{
+		&tg.InputChannel{ChannelID: rawID, AccessHash: 0},
+	})
+	if err == nil {
+		var chats []tg.ChatClass
+		switch chatsSlice := resCh.(type) {
+		case *tg.MessagesChatsSlice:
+			chats = chatsSlice.Chats
+		case *tg.MessagesChats:
+			chats = chatsSlice.Chats
+		}
+
+		for _, chatClass := range chats {
+			if ch, ok := chatClass.(*tg.Channel); ok && ch.ID == rawID {
+				bm.mu.Lock()
+				bm.channelHashes[ch.ID] = ch.AccessHash
+				bm.mu.Unlock()
+				return &tg.InputPeerChannel{
+					ChannelID:  ch.ID,
+					AccessHash: ch.AccessHash,
+				}, nil
+			}
+		}
+	}
+
+	// Fallback to absolute raw ID with 0 AccessHash
+	return &tg.InputPeerChannel{ChannelID: rawID}, nil
+}
+
+func extractMessageID(input string) int {
+	input = strings.TrimSpace(input)
+	if id, err := strconv.Atoi(input); err == nil {
+		return id
+	}
+	if strings.Contains(input, "t.me/") {
+		parts := strings.Split(input, "/")
+		if len(parts) > 0 {
+			lastPart := parts[len(parts)-1]
+			if idx := strings.Index(lastPart, "?"); idx != -1 {
+				lastPart = lastPart[:idx]
+			}
+			if id, err := strconv.Atoi(lastPart); err == nil {
+				return id
+			}
+		}
+	}
+	return 0
+}
+
+func parseHTML(text string) (string, []tg.MessageEntityClass) {
+	b := &entity.Builder{}
+	styling.Perform(b, html.String(nil, text))
+	return b.Complete()
 }
 
 // Inline messengers
 func (bm *BotManager) sendText(ctx context.Context, peer tg.InputPeerClass, text string) error {
+	plainText, entities := parseHTML(text)
 	_, err := bm.primary.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
 		Peer:      peer,
-		Message:   text,
+		Message:   plainText,
+		Entities:  entities,
 		NoWebpage: true,
 		RandomID:  getRandomID(),
 	})
 	return err
 }
 
+func (bm *BotManager) sendTextGetID(ctx context.Context, peer tg.InputPeerClass, text string) (int, error) {
+	plainText, entities := parseHTML(text)
+	updates, err := bm.primary.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
+		Peer:      peer,
+		Message:   plainText,
+		Entities:  entities,
+		NoWebpage: true,
+		RandomID:  getRandomID(),
+	})
+	if err != nil {
+		return 0, err
+	}
+	sentIDs := getSentMsgIDs(updates)
+	if len(sentIDs) > 0 {
+		return sentIDs[0], nil
+	}
+	return 0, nil
+}
+
+func (bm *BotManager) sendCloneTextGetID(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, text string) (int, error) {
+	plainText, entities := parseHTML(text)
+	updates, err := client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
+		Peer:      peer,
+		Message:   plainText,
+		Entities:  entities,
+		NoWebpage: true,
+		RandomID:  getRandomID(),
+	})
+	if err != nil {
+		return 0, err
+	}
+	sentIDs := getSentMsgIDs(updates)
+	if len(sentIDs) > 0 {
+		return sentIDs[0], nil
+	}
+	return 0, nil
+}
+
+func (bm *BotManager) deleteMessages(ctx context.Context, client *telegram.Client, msgIDs []int) {
+	var api *tg.Client
+	if client != nil {
+		api = client.API()
+	} else {
+		api = bm.primary.API()
+	}
+	
+	// Filter out any 0 values
+	var validIDs []int
+	for _, id := range msgIDs {
+		if id > 0 {
+			validIDs = append(validIDs, id)
+		}
+	}
+	if len(validIDs) == 0 {
+		return
+	}
+	
+	_, _ = api.MessagesDeleteMessages(ctx, &tg.MessagesDeleteMessagesRequest{
+		ID:     validIDs,
+		Revoke: true,
+	})
+}
+
 func (bm *BotManager) sendTextWithMarkup(ctx context.Context, peer tg.InputPeerClass, text string, markup tg.ReplyMarkupClass) error {
+	plainText, entities := parseHTML(text)
 	_, err := bm.primary.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
 		Peer:        peer,
-		Message:     text,
+		Message:     plainText,
+		Entities:    entities,
 		ReplyMarkup: markup,
 		NoWebpage:   true,
 		RandomID:    getRandomID(),
@@ -1114,10 +1394,12 @@ func (bm *BotManager) sendTextWithMarkup(ctx context.Context, peer tg.InputPeerC
 }
 
 func (bm *BotManager) editMessage(ctx context.Context, peer tg.InputPeerClass, msgID int, text string, markup tg.ReplyMarkupClass) error {
+	plainText, entities := parseHTML(text)
 	_, err := bm.primary.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
 		Peer:        peer,
 		ID:          msgID,
-		Message:     text,
+		Message:     plainText,
+		Entities:    entities,
 		ReplyMarkup: markup,
 		NoWebpage:   true,
 	})
@@ -1206,6 +1488,10 @@ func getSentMsgIDs(updates tg.UpdatesClass) []int {
 				if msg, ok := ev.Message.(*tg.Message); ok {
 					ids = append(ids, msg.ID)
 				}
+			case *tg.UpdateNewChannelMessage:
+				if msg, ok := ev.Message.(*tg.Message); ok {
+					ids = append(ids, msg.ID)
+				}
 			}
 		}
 	case *tg.UpdatesCombined:
@@ -1215,9 +1501,17 @@ func getSentMsgIDs(updates tg.UpdatesClass) []int {
 				if msg, ok := ev.Message.(*tg.Message); ok {
 					ids = append(ids, msg.ID)
 				}
+			case *tg.UpdateNewChannelMessage:
+				if msg, ok := ev.Message.(*tg.Message); ok {
+					ids = append(ids, msg.ID)
+				}
 			}
 		}
 	case *tg.UpdateShortSentMessage:
+		ids = append(ids, u.ID)
+	case *tg.UpdateShortMessage:
+		ids = append(ids, u.ID)
+	case *tg.UpdateShortChatMessage:
 		ids = append(ids, u.ID)
 	}
 	return ids
@@ -1226,7 +1520,7 @@ func getSentMsgIDs(updates tg.UpdatesClass) []int {
 func (bm *BotManager) handleMainBroadcast(ctx context.Context, message string, replyToMsgID int, ownerPeer tg.InputPeerClass) {
 	users, err := bm.mongo.FullUserbase(ctx)
 	if err != nil {
-		bm.logger.Warn("Failed to fetch user base for broadcast", zap.Error(err))
+		bm.logger.Warn("Failed to fetch user base for broadcast", zap.String("error", err.Error()))
 		return
 	}
 
@@ -1268,6 +1562,7 @@ func (bm *BotManager) handleMainBroadcast(ctx context.Context, message string, r
 				ID:         []int{replyToMsgID},
 				ToPeer:     peer,
 				DropAuthor: true, // Copy message including inline keyboards
+				RandomID:   []int64{getRandomID()},
 			})
 		} else {
 			sendErr = bm.sendText(ctx, peer, message)
@@ -1285,6 +1580,7 @@ func (bm *BotManager) handleMainBroadcast(ctx context.Context, message string, r
 						ID:         []int{replyToMsgID},
 						ToPeer:     peer,
 						DropAuthor: true,
+						RandomID:   []int64{getRandomID()},
 					})
 				} else {
 					sendErr = bm.sendText(ctx, peer, message)

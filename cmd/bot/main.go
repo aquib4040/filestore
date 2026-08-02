@@ -34,7 +34,9 @@ func init() {
 
 func main() {
 	// Initialize logger
-	logger, _ := zap.NewDevelopment()
+	cfgLog := zap.NewDevelopmentConfig()
+	cfgLog.DisableStacktrace = true
+	logger, _ := cfgLog.Build()
 	defer logger.Sync()
 
 	logger.Info("Starting Go FileStore Bot...")

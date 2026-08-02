@@ -37,7 +37,7 @@ func (bm *BotManager) handleCloneCommand(ctx context.Context, token string, user
 		},
 	}).Decode(&botDoc)
 	if err != nil {
-		bm.logger.Warn("Failed to find clone bot info in database", zap.Error(err))
+		bm.logger.Warn("Failed to find clone bot info in database", zap.String("error", err.Error()))
 		return nil
 	}
 
@@ -226,7 +226,7 @@ func (bm *BotManager) handleCloneCommand(ctx context.Context, token string, user
 	return nil
 }
 
-func (bm *BotManager) handleCloneStart(ctx context.Context, client *telegram.Client, botDoc db.ClonedBotDoc, userID int64, args []string, msg *tg.Message) error {
+func (bm *BotManager) handleCloneStart(ctx context.Context, client *telegram.Client, botDoc db.ClonedBotDoc, userID int64, args []string, _ *tg.Message) error {
 	peer := &tg.InputPeerUser{UserID: userID}
 
 	// Clone-scoped ban check
@@ -375,7 +375,7 @@ func (bm *BotManager) handleCloneStart(ctx context.Context, client *telegram.Cli
 	}
 
 	api := client.API()
-	inputChannel := &tg.InputPeerChannel{ChannelID: targetChannelID}
+	inputChannel, _ := bm.getChannelPeer(ctx, client, targetChannelID)
 
 	// Personal settings
 	userPrefs, _ := bm.mongo.GetUserSettings(ctx, userID)
@@ -396,9 +396,10 @@ func (bm *BotManager) handleCloneStart(ctx context.Context, client *telegram.Cli
 			WithMyScore: false,
 			DropAuthor:  true, // makes copy
 			Noforwards:  protectContent,
+			RandomID:    []int64{getRandomID()},
 		})
 		if err != nil {
-			bm.logger.Warn("Clone bot failed to forward message", zap.Int("msg_id", msgID), zap.Error(err))
+			bm.logger.Warn("Clone bot failed to forward message", zap.Int("msg_id", msgID), zap.String("error", err.Error()))
 		} else if autoDelDelay > 0 {
 			sentMsgIDs := getSentMsgIDs(updates)
 			if len(sentMsgIDs) > 0 {
@@ -501,23 +502,23 @@ func (bm *BotManager) handleCloneCallback(ctx context.Context, token string, u *
 
 	// Prompt triggers
 	case "clone_add_api":
-		go bm.promptCloneAPI(ctx, client, u.UserID, token)
+		go bm.promptCloneAPI(ctx, client, u.UserID, token, u.MsgID)
 	case "clone_add_site":
-		go bm.promptCloneSite(ctx, client, u.UserID, token)
+		go bm.promptCloneSite(ctx, client, u.UserID, token, u.MsgID)
 	case "clone_add_caption":
-		go bm.promptCloneCaption(ctx, client, u.UserID, token)
+		go bm.promptCloneCaption(ctx, client, u.UserID, token, u.MsgID)
 	case "clone_add_start_txt":
-		go bm.promptCloneStartTxt(ctx, client, u.UserID, token)
+		go bm.promptCloneStartTxt(ctx, client, u.UserID, token, u.MsgID)
 	case "clone_add_fsub_txt":
-		go bm.promptCloneFSubTxt(ctx, client, u.UserID, token)
+		go bm.promptCloneFSubTxt(ctx, client, u.UserID, token, u.MsgID)
 	case "clone_add_upi":
-		go bm.promptCloneUPI(ctx, client, u.UserID, token)
+		go bm.promptCloneUPI(ctx, client, u.UserID, token, u.MsgID)
 	case "clone_add_plans":
-		go bm.promptClonePlans(ctx, client, u.UserID, token)
+		go bm.promptClonePlans(ctx, client, u.UserID, token, u.MsgID)
 	case "clone_add_fsub_ch":
-		go bm.promptCloneFSubCh(ctx, client, u.UserID, token)
+		go bm.promptCloneFSubCh(ctx, client, u.UserID, token, u.MsgID)
 	case "clone_add_db_ch":
-		go bm.promptCloneDBCh(ctx, client, u.UserID, token)
+		go bm.promptCloneDBCh(ctx, client, u.UserID, token, u.MsgID)
 
 	case "clone_close":
 		_, err := client.API().MessagesDeleteMessages(ctx, &tg.MessagesDeleteMessagesRequest{
@@ -531,7 +532,7 @@ func (bm *BotManager) handleCloneCallback(ctx context.Context, token string, u *
 
 // Clone Settings Dashboard layout
 
-func (bm *BotManager) sendCloneSettingsPanel(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, botDoc db.ClonedBotDoc, editMsgID int) error {
+func (bm *BotManager) sendCloneSettingsPanel(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, _ db.ClonedBotDoc, editMsgID int) error {
 	msg := fmt.Sprintf("<blockquote>✦ %s ✦</blockquote>\nConfigure your clone bot options below:", ToSmallCaps("Clone Settings Dashboard"))
 
 	rows := [][]tg.KeyboardButtonClass{
@@ -549,24 +550,9 @@ func (bm *BotManager) sendCloneSettingsPanel(ctx context.Context, client *telegr
 	}
 
 	if editMsgID > 0 {
-		_, err := client.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-			Peer:        peer,
-			ID:          editMsgID,
-			Message:     msg,
-			ReplyMarkup: NewInlineMarkup(rows),
-			NoWebpage:   true,
-		})
-		return err
+		return bm.editCloneMessage(ctx, client, peer, editMsgID, msg, NewInlineMarkup(rows))
 	}
-
-	_, err := client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
-		Peer:        peer,
-		Message:     msg,
-		ReplyMarkup: NewInlineMarkup(rows),
-		NoWebpage:   true,
-		RandomID:    getRandomID(),
-	})
-	return err
+	return bm.sendCloneTextWithMarkup(ctx, client, peer, msg, NewInlineMarkup(rows))
 }
 
 func (bm *BotManager) sendCloneShortenerMenu(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, botDoc db.ClonedBotDoc, msgID int) error {
@@ -580,17 +566,10 @@ func (bm *BotManager) sendCloneShortenerMenu(ctx context.Context, client *telegr
 			NewCallbackButtonWithStyle(ToSmallCaps("Back"), "clone_home", styleBlue),
 		},
 	}
-	_, err := client.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-		Peer:        peer,
-		ID:          msgID,
-		Message:     msg,
-		ReplyMarkup: NewInlineMarkup(rows),
-		NoWebpage:   true,
-	})
-	return err
+	return bm.editCloneMessage(ctx, client, peer, msgID, msg, NewInlineMarkup(rows))
 }
 
-func (bm *BotManager) sendCloneTextsMenu(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, botDoc db.ClonedBotDoc, msgID int) error {
+func (bm *BotManager) sendCloneTextsMenu(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, _ db.ClonedBotDoc, msgID int) error {
 	msg := fmt.Sprintf("<blockquote>✦ %s ✦</blockquote>\nConfigure start link welcome message and captions:", ToSmallCaps("Clone Texts Customization"))
 	rows := [][]tg.KeyboardButtonClass{
 		{
@@ -604,17 +583,10 @@ func (bm *BotManager) sendCloneTextsMenu(ctx context.Context, client *telegram.C
 			NewCallbackButtonWithStyle(ToSmallCaps("Back"), "clone_home", styleBlue),
 		},
 	}
-	_, err := client.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-		Peer:        peer,
-		ID:          msgID,
-		Message:     msg,
-		ReplyMarkup: NewInlineMarkup(rows),
-		NoWebpage:   true,
-	})
-	return err
+	return bm.editCloneMessage(ctx, client, peer, msgID, msg, NewInlineMarkup(rows))
 }
 
-func (bm *BotManager) sendClonePicsMenu(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, botDoc db.ClonedBotDoc, msgID int) error {
+func (bm *BotManager) sendClonePicsMenu(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, _ db.ClonedBotDoc, msgID int) error {
 	msg := fmt.Sprintf("<blockquote>✦ %s ✦</blockquote>\nConfigure monetization channels and UPI coordinates:", ToSmallCaps("Clone Checkout Details"))
 	rows := [][]tg.KeyboardButtonClass{
 		{
@@ -625,14 +597,7 @@ func (bm *BotManager) sendClonePicsMenu(ctx context.Context, client *telegram.Cl
 			NewCallbackButtonWithStyle(ToSmallCaps("Back"), "clone_home", styleBlue),
 		},
 	}
-	_, err := client.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-		Peer:        peer,
-		ID:          msgID,
-		Message:     msg,
-		ReplyMarkup: NewInlineMarkup(rows),
-		NoWebpage:   true,
-	})
-	return err
+	return bm.editCloneMessage(ctx, client, peer, msgID, msg, NewInlineMarkup(rows))
 }
 
 func (bm *BotManager) sendCloneChannelsMenu(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, botDoc db.ClonedBotDoc, msgID int) error {
@@ -646,14 +611,7 @@ func (bm *BotManager) sendCloneChannelsMenu(ctx context.Context, client *telegra
 			NewCallbackButtonWithStyle(ToSmallCaps("Back"), "clone_home", styleBlue),
 		},
 	}
-	_, err := client.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-		Peer:        peer,
-		ID:          msgID,
-		Message:     msg,
-		ReplyMarkup: NewInlineMarkup(rows),
-		NoWebpage:   true,
-	})
-	return err
+	return bm.editCloneMessage(ctx, client, peer, msgID, msg, NewInlineMarkup(rows))
 }
 
 func (bm *BotManager) sendCloneMySettingsPanel(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, userID int64, editMsgID int) error {
@@ -682,123 +640,241 @@ func (bm *BotManager) sendCloneMySettingsPanel(ctx context.Context, client *tele
 	}
 
 	if editMsgID > 0 {
-		_, err := client.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-			Peer:        peer,
-			ID:          editMsgID,
-			Message:     msg,
-			ReplyMarkup: NewInlineMarkup(rows),
-			NoWebpage:   true,
-		})
-		return err
+		return bm.editCloneMessage(ctx, client, peer, editMsgID, msg, NewInlineMarkup(rows))
 	}
-	_, err := client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
-		Peer:        peer,
-		Message:     msg,
-		ReplyMarkup: NewInlineMarkup(rows),
-		NoWebpage:   true,
-		RandomID:    getRandomID(),
-	})
-	return err
+	return bm.sendCloneTextWithMarkup(ctx, client, peer, msg, NewInlineMarkup(rows))
 }
 
 // Background prompt input handlers for clone settings
 
-func (bm *BotManager) promptCloneAPI(ctx context.Context, client *telegram.Client, userID int64, token string) {
+func (bm *BotManager) promptCloneAPI(ctx context.Context, client *telegram.Client, userID int64, token string, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendCloneText(ctx, client, peer, "<b>Send your new URL Shortener API key in the next 60 seconds:</b>")
+	promptID, _ := bm.sendCloneTextGetID(ctx, client, peer, "<b>Send your new URL Shortener API key in the next 60 seconds:</b>")
 	val, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, client, []int{promptID, userInputMsgID})
+
+	botDoc, docErr := bm.mongo.GetClonedBot(ctx, token)
+
 	if err == nil && val != "/cancel" {
 		_ = bm.updateCloneField(ctx, token, "shortener_api", strings.TrimSpace(val))
-		_ = bm.sendCloneText(ctx, client, peer, "API key updated successfully!")
+		successID, _ := bm.sendCloneTextGetID(ctx, client, peer, "✅ <b>API key updated successfully!</b>")
+		time.Sleep(2 * time.Second)
+		bm.deleteMessages(ctx, client, []int{successID})
+		if docErr == nil {
+			botDoc.ShortenerAPI = strings.TrimSpace(val)
+		}
+	}
+
+	if docErr == nil {
+		_ = bm.sendCloneShortenerMenu(ctx, client, peer, botDoc, menuMsgID)
 	}
 }
 
-func (bm *BotManager) promptCloneSite(ctx context.Context, client *telegram.Client, userID int64, token string) {
+func (bm *BotManager) promptCloneSite(ctx context.Context, client *telegram.Client, userID int64, token string, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendCloneText(ctx, client, peer, "<b>Send your URL Shortener domain in the next 60 seconds:</b>\nExample: `linkshortify.com`")
+	promptID, _ := bm.sendCloneTextGetID(ctx, client, peer, "<b>Send your URL Shortener domain in the next 60 seconds:</b>\nExample: `linkshortify.com`")
 	val, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, client, []int{promptID, userInputMsgID})
+
+	botDoc, docErr := bm.mongo.GetClonedBot(ctx, token)
+
 	if err == nil && val != "/cancel" {
 		_ = bm.updateCloneField(ctx, token, "base_site", strings.TrimSpace(val))
-		_ = bm.sendCloneText(ctx, client, peer, "Shortener domain updated successfully!")
+		successID, _ := bm.sendCloneTextGetID(ctx, client, peer, "✅ <b>Shortener domain updated successfully!</b>")
+		time.Sleep(2 * time.Second)
+		bm.deleteMessages(ctx, client, []int{successID})
+		if docErr == nil {
+			botDoc.BaseSite = strings.TrimSpace(val)
+		}
+	}
+
+	if docErr == nil {
+		_ = bm.sendCloneShortenerMenu(ctx, client, peer, botDoc, menuMsgID)
 	}
 }
 
-func (bm *BotManager) promptCloneCaption(ctx context.Context, client *telegram.Client, userID int64, token string) {
+func (bm *BotManager) promptCloneCaption(ctx context.Context, client *telegram.Client, userID int64, token string, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendCloneText(ctx, client, peer, "<b>Send your custom file download caption text:</b>")
+	promptID, _ := bm.sendCloneTextGetID(ctx, client, peer, "<b>Send your custom file download caption text:</b>")
 	val, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, client, []int{promptID, userInputMsgID})
+
+	botDoc, docErr := bm.mongo.GetClonedBot(ctx, token)
+
 	if err == nil && val != "/cancel" {
 		_ = bm.updateCloneField(ctx, token, "custom_caption", val)
-		_ = bm.sendCloneText(ctx, client, peer, "Custom file caption updated successfully!")
+		successID, _ := bm.sendCloneTextGetID(ctx, client, peer, "✅ <b>Custom file caption updated successfully!</b>")
+		time.Sleep(2 * time.Second)
+		bm.deleteMessages(ctx, client, []int{successID})
+		if docErr == nil {
+			botDoc.CustomCaption = val
+		}
+	}
+
+	if docErr == nil {
+		_ = bm.sendCloneTextsMenu(ctx, client, peer, botDoc, menuMsgID)
 	}
 }
 
-func (bm *BotManager) promptCloneStartTxt(ctx context.Context, client *telegram.Client, userID int64, token string) {
+func (bm *BotManager) promptCloneStartTxt(ctx context.Context, client *telegram.Client, userID int64, token string, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendCloneText(ctx, client, peer, "<b>Send your custom start greeting text:</b>")
+	promptID, _ := bm.sendCloneTextGetID(ctx, client, peer, "<b>Send your custom start greeting text:</b>")
 	val, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, client, []int{promptID, userInputMsgID})
+
+	botDoc, docErr := bm.mongo.GetClonedBot(ctx, token)
+
 	if err == nil && val != "/cancel" {
 		_ = bm.updateCloneField(ctx, token, "start_text", val)
-		_ = bm.sendCloneText(ctx, client, peer, "Start greeting message updated!")
+		successID, _ := bm.sendCloneTextGetID(ctx, client, peer, "✅ <b>Start greeting message updated!</b>")
+		time.Sleep(2 * time.Second)
+		bm.deleteMessages(ctx, client, []int{successID})
+		if docErr == nil {
+			botDoc.StartText = val
+		}
+	}
+
+	if docErr == nil {
+		_ = bm.sendCloneTextsMenu(ctx, client, peer, botDoc, menuMsgID)
 	}
 }
 
-func (bm *BotManager) promptCloneFSubTxt(ctx context.Context, client *telegram.Client, userID int64, token string) {
+func (bm *BotManager) promptCloneFSubTxt(ctx context.Context, client *telegram.Client, userID int64, token string, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendCloneText(ctx, client, peer, "<b>Send your custom Force Subscribe prompt text:</b>")
+	promptID, _ := bm.sendCloneTextGetID(ctx, client, peer, "<b>Send your custom Force Subscribe prompt text:</b>")
 	val, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, client, []int{promptID, userInputMsgID})
+
+	botDoc, docErr := bm.mongo.GetClonedBot(ctx, token)
+
 	if err == nil && val != "/cancel" {
 		_ = bm.updateCloneField(ctx, token, "fsub_text", val)
-		_ = bm.sendCloneText(ctx, client, peer, "Force Subscribe prompt message updated!")
+		successID, _ := bm.sendCloneTextGetID(ctx, client, peer, "✅ <b>Force Subscribe prompt message updated!</b>")
+		time.Sleep(2 * time.Second)
+		bm.deleteMessages(ctx, client, []int{successID})
+		if docErr == nil {
+			botDoc.FSubText = val
+		}
+	}
+
+	if docErr == nil {
+		_ = bm.sendCloneTextsMenu(ctx, client, peer, botDoc, menuMsgID)
 	}
 }
 
-func (bm *BotManager) promptCloneUPI(ctx context.Context, client *telegram.Client, userID int64, token string) {
+func (bm *BotManager) promptCloneUPI(ctx context.Context, client *telegram.Client, userID int64, token string, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendCloneText(ctx, client, peer, "<b>Send your premium checkout UPI ID in the next 60 seconds:</b>")
+	promptID, _ := bm.sendCloneTextGetID(ctx, client, peer, "<b>Send your premium checkout UPI ID in the next 60 seconds:</b>")
 	val, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, client, []int{promptID, userInputMsgID})
+
+	botDoc, docErr := bm.mongo.GetClonedBot(ctx, token)
+
 	if err == nil && val != "/cancel" {
 		_ = bm.updateCloneField(ctx, token, "upi_id", strings.TrimSpace(val))
-		_ = bm.sendCloneText(ctx, client, peer, "Payment UPI ID updated!")
+		successID, _ := bm.sendCloneTextGetID(ctx, client, peer, "✅ <b>Payment UPI ID updated!</b>")
+		time.Sleep(2 * time.Second)
+		bm.deleteMessages(ctx, client, []int{successID})
+		if docErr == nil {
+			botDoc.UPIID = strings.TrimSpace(val)
+		}
+	}
+
+	if docErr == nil {
+		_ = bm.sendClonePicsMenu(ctx, client, peer, botDoc, menuMsgID)
 	}
 }
 
-func (bm *BotManager) promptClonePlans(ctx context.Context, client *telegram.Client, userID int64, token string) {
+func (bm *BotManager) promptClonePlans(ctx context.Context, client *telegram.Client, userID int64, token string, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendCloneText(ctx, client, peer, "<b>Send your custom plans pricing description:</b>")
+	promptID, _ := bm.sendCloneTextGetID(ctx, client, peer, "<b>Send your custom plans pricing description:</b>")
 	val, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, client, []int{promptID, userInputMsgID})
+
+	botDoc, docErr := bm.mongo.GetClonedBot(ctx, token)
+
 	if err == nil && val != "/cancel" {
 		_ = bm.updateCloneField(ctx, token, "plans_details", val)
-		_ = bm.sendCloneText(ctx, client, peer, "Checkout plans configuration updated!")
+		successID, _ := bm.sendCloneTextGetID(ctx, client, peer, "✅ <b>Checkout plans configuration updated!</b>")
+		time.Sleep(2 * time.Second)
+		bm.deleteMessages(ctx, client, []int{successID})
+		if docErr == nil {
+			botDoc.PlansDetails = val
+		}
+	}
+
+	if docErr == nil {
+		_ = bm.sendClonePicsMenu(ctx, client, peer, botDoc, menuMsgID)
 	}
 }
 
-func (bm *BotManager) promptCloneFSubCh(ctx context.Context, client *telegram.Client, userID int64, token string) {
+func (bm *BotManager) promptCloneFSubCh(ctx context.Context, client *telegram.Client, userID int64, token string, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendCloneText(ctx, client, peer, "<b>Send your FSub Channel ID and request approval boolean (yes/no) separated by a space:</b>\nExample: `-100123456789 yes`")
+	promptID, _ := bm.sendCloneTextGetID(ctx, client, peer, "<b>Send your FSub Channel ID and request approval boolean (yes/no) separated by a space:</b>\nExample: `-100123456789 yes`")
 	val, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, client, []int{promptID, userInputMsgID})
+
+	botDoc, docErr := bm.mongo.GetClonedBot(ctx, token)
+
 	if err == nil && val != "/cancel" {
 		parts := strings.Fields(val)
 		if len(parts) < 2 {
-			_ = bm.sendCloneText(ctx, client, peer, "Invalid format.")
+			errID, _ := bm.sendCloneTextGetID(ctx, client, peer, "❌ <b>Invalid format.</b>")
+			time.Sleep(3 * time.Second)
+			bm.deleteMessages(ctx, client, []int{errID})
+			if docErr == nil {
+				_ = bm.sendCloneChannelsMenu(ctx, client, peer, botDoc, menuMsgID)
+			}
 			return
 		}
 		chID, _ := strconv.ParseInt(parts[0], 10, 64)
 		req := parts[1] == "yes" || parts[1] == "true"
 		_ = bm.updateCloneField(ctx, token, "fsub_channel_id", chID)
 		_ = bm.updateCloneField(ctx, token, "fsub_channel_req", req)
-		_ = bm.sendCloneText(ctx, client, peer, "FSub channel updated successfully!")
+		successID, _ := bm.sendCloneTextGetID(ctx, client, peer, "✅ <b>FSub channel updated successfully!</b>")
+		time.Sleep(2 * time.Second)
+		bm.deleteMessages(ctx, client, []int{successID})
+		if docErr == nil {
+			botDoc.FSubChannelID = chID
+			botDoc.FSubChannelReq = req
+		}
+	}
+
+	if docErr == nil {
+		_ = bm.sendCloneChannelsMenu(ctx, client, peer, botDoc, menuMsgID)
 	}
 }
 
-func (bm *BotManager) promptCloneDBCh(ctx context.Context, client *telegram.Client, userID int64, token string) {
+func (bm *BotManager) promptCloneDBCh(ctx context.Context, client *telegram.Client, userID int64, token string, menuMsgID int) {
 	peer := &tg.InputPeerUser{UserID: userID}
-	_ = bm.sendCloneText(ctx, client, peer, "<b>Send your dedicated database storage channel ID:</b>\nExample: `-100123456789`")
+	promptID, _ := bm.sendCloneTextGetID(ctx, client, peer, "<b>Send your dedicated database storage channel ID:</b>\nExample: `-100123456789`")
 	val, err := bm.state.Listen(ctx, userID, 60*time.Second)
+	userInputMsgID := bm.state.GetLastInputMsgID(userID)
+	bm.deleteMessages(ctx, client, []int{promptID, userInputMsgID})
+
+	botDoc, docErr := bm.mongo.GetClonedBot(ctx, token)
+
 	if err == nil && val != "/cancel" {
 		chID, _ := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
 		_ = bm.updateCloneField(ctx, token, "db_channel_id", chID)
-		_ = bm.sendCloneText(ctx, client, peer, "Database storage channel updated successfully!")
+		successID, _ := bm.sendCloneTextGetID(ctx, client, peer, "✅ <b>Database storage channel updated successfully!</b>")
+		time.Sleep(2 * time.Second)
+		bm.deleteMessages(ctx, client, []int{successID})
+		if docErr == nil {
+			botDoc.DBChannelID = chID
+		}
+	}
+
+	if docErr == nil {
+		_ = bm.sendCloneChannelsMenu(ctx, client, peer, botDoc, menuMsgID)
 	}
 }
 
@@ -818,9 +894,11 @@ func (bm *BotManager) updateCloneField(ctx context.Context, token, field string,
 
 // Cloned Bot messengers
 func (bm *BotManager) sendCloneText(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, text string) error {
+	plainText, entities := parseHTML(text)
 	_, err := client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
 		Peer:      peer,
-		Message:   text,
+		Message:   plainText,
+		Entities:  entities,
 		NoWebpage: true,
 		RandomID:  getRandomID(),
 	})
@@ -828,9 +906,11 @@ func (bm *BotManager) sendCloneText(ctx context.Context, client *telegram.Client
 }
 
 func (bm *BotManager) sendCloneTextWithMarkup(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, text string, markup tg.ReplyMarkupClass) error {
+	plainText, entities := parseHTML(text)
 	_, err := client.API().MessagesSendMessage(ctx, &tg.MessagesSendMessageRequest{
 		Peer:        peer,
-		Message:     text,
+		Message:     plainText,
+		Entities:    entities,
 		ReplyMarkup: markup,
 		NoWebpage:   true,
 		RandomID:    getRandomID(),
@@ -838,10 +918,23 @@ func (bm *BotManager) sendCloneTextWithMarkup(ctx context.Context, client *teleg
 	return err
 }
 
+func (bm *BotManager) editCloneMessage(ctx context.Context, client *telegram.Client, peer tg.InputPeerClass, msgID int, text string, markup tg.ReplyMarkupClass) error {
+	plainText, entities := parseHTML(text)
+	_, err := client.API().MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
+		Peer:        peer,
+		ID:          msgID,
+		Message:     plainText,
+		Entities:    entities,
+		ReplyMarkup: markup,
+		NoWebpage:   true,
+	})
+	return err
+}
+
 func (bm *BotManager) handleCloneBroadcast(ctx context.Context, client *telegram.Client, botID int64, message string, replyToMsgID int, ownerPeer tg.InputPeerClass) {
 	users, err := bm.mongo.GetCloneUserbase(ctx, botID)
 	if err != nil {
-		bm.logger.Warn("Failed to fetch clone user base for broadcast", zap.Int64("bot_id", botID), zap.Error(err))
+		bm.logger.Warn("Failed to fetch clone user base for broadcast", zap.Int64("bot_id", botID), zap.String("error", err.Error()))
 		return
 	}
 
@@ -883,6 +976,7 @@ func (bm *BotManager) handleCloneBroadcast(ctx context.Context, client *telegram
 				ID:         []int{replyToMsgID},
 				ToPeer:     peer,
 				DropAuthor: true, // Copy message including inline keyboards
+				RandomID:   []int64{getRandomID()},
 			})
 		} else {
 			sendErr = bm.sendCloneText(ctx, client, peer, message)
@@ -891,11 +985,7 @@ func (bm *BotManager) handleCloneBroadcast(ctx context.Context, client *telegram
 		if sendErr != nil {
 			if d, ok := tgerr.AsFloodWait(sendErr); ok {
 				if statusMsgID > 0 {
-					_, _ = api.MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-						Peer:    ownerPeer,
-						ID:      statusMsgID,
-						Message: fmt.Sprintf("✦ %s ✦\n\n⚠️ **FLOOD WAIT**: Sleeping for %v\n\n%s\n›› **Success:** %d\n›› **Failed:** %d", ToSmallCaps("Broadcast Paused"), d, getProgressBar(idx, total), success, fail),
-					})
+					_ = bm.editCloneMessage(ctx, client, ownerPeer, statusMsgID, fmt.Sprintf("✦ %s ✦\n\n⚠️ **FLOOD WAIT**: Sleeping for %v\n\n%s\n›› **Success:** %d\n›› **Failed:** %d", ToSmallCaps("Broadcast Paused"), d, getProgressBar(idx, total), success, fail), nil)
 				}
 				time.Sleep(d)
 				if replyToMsgID > 0 {
@@ -904,6 +994,7 @@ func (bm *BotManager) handleCloneBroadcast(ctx context.Context, client *telegram
 						ID:         []int{replyToMsgID},
 						ToPeer:     peer,
 						DropAuthor: true,
+						RandomID:   []int64{getRandomID()},
 					})
 				} else {
 					sendErr = bm.sendCloneText(ctx, client, peer, message)
@@ -919,11 +1010,7 @@ func (bm *BotManager) handleCloneBroadcast(ctx context.Context, client *telegram
 
 		if time.Since(lastUpdate) > 2*time.Second || idx == total-1 {
 			if statusMsgID > 0 {
-				_, _ = api.MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-					Peer:    ownerPeer,
-					ID:      statusMsgID,
-					Message: fmt.Sprintf("✦ %s ✦\n\n%s\n›› **Total Users:** %d\n›› **Success:** %d\n›› **Failed:** %d", ToSmallCaps("Broadcast Progress"), getProgressBar(idx+1, total), total, success, fail),
-				})
+				_ = bm.editCloneMessage(ctx, client, ownerPeer, statusMsgID, fmt.Sprintf("✦ %s ✦\n\n%s\n›› **Total Users:** %d\n›› **Success:** %d\n›› **Failed:** %d", ToSmallCaps("Broadcast Progress"), getProgressBar(idx+1, total), total, success, fail), nil)
 			}
 			lastUpdate = time.Now()
 		}
@@ -932,10 +1019,6 @@ func (bm *BotManager) handleCloneBroadcast(ctx context.Context, client *telegram
 	}
 
 	if statusMsgID > 0 {
-		_, _ = api.MessagesEditMessage(ctx, &tg.MessagesEditMessageRequest{
-			Peer:    ownerPeer,
-			ID:      statusMsgID,
-			Message: fmt.Sprintf("✦ %s ✦\n\n%s\n\n›› **Success:** %d\n›› **Failed:** %d", ToSmallCaps("Broadcast Complete"), getProgressBar(total, total), success, fail),
-		})
+		_ = bm.editCloneMessage(ctx, client, ownerPeer, statusMsgID, fmt.Sprintf("✦ %s ✦\n\n%s\n\n›› **Success:** %d\n›› **Failed:** %d", ToSmallCaps("Broadcast Complete"), getProgressBar(total, total), success, fail), nil)
 	}
 }

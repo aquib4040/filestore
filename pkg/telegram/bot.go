@@ -11,6 +11,7 @@ import (
 	"filestore/pkg/config"
 	"filestore/pkg/db"
 
+	"github.com/gotd/log/logzap"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 	"go.uber.org/zap"
@@ -32,18 +33,20 @@ type BotManager struct {
 	botUsername  string
 	uptime       time.Time
 	admins       []int64
+	channelHashes map[int64]int64
 }
 
 func NewBotManager(cfg *config.Config, mongoDB *db.MongoDB, logger *zap.Logger) *BotManager {
 	return &BotManager{
-		config:      cfg,
-		mongo:       mongoDB,
-		state:       NewStateRegistry(),
-		clones:      make(map[string]*telegram.Client),
-		cloneCancel: make(map[string]context.CancelFunc),
-		cloneMode:   true, // default on
-		logger:      logger,
-		uptime:      time.Now(),
+		config:        cfg,
+		mongo:         mongoDB,
+		state:         NewStateRegistry(),
+		clones:        make(map[string]*telegram.Client),
+		cloneCancel:   make(map[string]context.CancelFunc),
+		cloneMode:     true, // default on
+		logger:        logger,
+		uptime:        time.Now(),
+		channelHashes: make(map[int64]int64),
 	}
 }
 
@@ -66,7 +69,7 @@ func (bm *BotManager) Start(ctx context.Context) error {
 	go func() {
 		err := bm.runBot(ctx, bm.config.BotToken, false)
 		if err != nil {
-			bm.logger.Error("Primary bot crashed", zap.Error(err))
+			bm.logger.Error("Primary bot crashed", zap.String("error", err.Error()))
 		}
 	}()
 
@@ -77,7 +80,7 @@ func (bm *BotManager) Start(ctx context.Context) error {
 			bm.logger.Info("Restarting cloned bot", zap.String("username", b.Username))
 			go func(token string) {
 				if err := bm.runBot(ctx, token, true); err != nil {
-					bm.logger.Warn("Failed to start cloned bot", zap.String("token", token), zap.Error(err))
+					bm.logger.Warn("Failed to start cloned bot", zap.String("token", token), zap.String("error", err.Error()))
 				}
 			}(b.Token)
 		}
@@ -98,7 +101,7 @@ func (bm *BotManager) runBot(ctx context.Context, token string, isClone bool) er
 	client := telegram.NewClient(bm.config.APIID, bm.config.APIHash, telegram.Options{
 		SessionStorage: sessionStorage,
 		UpdateHandler:  dispatcher,
-		Logger:         bm.logger.Named(fmt.Sprintf("tg_client_%t", isClone)),
+		Logger:         logzap.New(bm.logger.Named(fmt.Sprintf("tg_client_%t", isClone)).WithOptions(zap.IncreaseLevel(zap.WarnLevel))),
 	})
 
 	bm.mu.Lock()
@@ -192,7 +195,7 @@ func (bm *BotManager) RegisterClone(ctx context.Context, token, mongoURI string,
 	// Temp client to verify and fetch info
 	verifyClient := telegram.NewClient(bm.config.APIID, bm.config.APIHash, telegram.Options{
 		SessionStorage: sessionStorage,
-		Logger:         bm.logger.Named("verify_clone"),
+		Logger:         logzap.New(bm.logger.Named("verify_clone").WithOptions(zap.IncreaseLevel(zap.WarnLevel))),
 	})
 
 	var botUser *tg.User
@@ -261,7 +264,7 @@ func (bm *BotManager) RegisterClone(ctx context.Context, token, mongoURI string,
 
 	go func() {
 		if err := bm.runBot(cloneCtx, token, true); err != nil {
-			bm.logger.Warn("Cloned bot stopped running", zap.String("token", token), zap.Error(err))
+			bm.logger.Warn("Cloned bot stopped running", zap.String("token", token), zap.String("error", err.Error()))
 		}
 	}()
 
@@ -395,7 +398,7 @@ func (bm *BotManager) SetupAdminCommands(ctx context.Context, userID, accessHash
 	})
 }
 
-func (bm *BotManager) setCloneBotCommands(ctx context.Context, client *telegram.Client, ownerID int64) error {
+func (bm *BotManager) setCloneBotCommands(ctx context.Context, client *telegram.Client, _ int64) error {
 	api := client.API()
 
 	// 1. Default commands (for standard clone users)

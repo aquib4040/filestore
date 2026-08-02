@@ -26,10 +26,14 @@ func NewCallbackButton(text, data string) *tg.KeyboardButtonCallback {
 }
 
 func NewCallbackButtonWithStyle(text, data string, style interface{}) *tg.KeyboardButtonCallback {
-	return &tg.KeyboardButtonCallback{
+	btn := &tg.KeyboardButtonCallback{
 		Text: text,
 		Data: []byte(data),
 	}
+	if s, ok := style.(tg.KeyboardButtonStyle); ok {
+		btn.SetStyle(s)
+	}
+	return btn
 }
 
 func NewURLButton(text, url string) *tg.KeyboardButtonURL {
@@ -40,10 +44,14 @@ func NewURLButton(text, url string) *tg.KeyboardButtonURL {
 }
 
 func NewURLButtonWithStyle(text, url string, style interface{}) *tg.KeyboardButtonURL {
-	return &tg.KeyboardButtonURL{
+	btn := &tg.KeyboardButtonURL{
 		Text: text,
 		URL:  url,
 	}
+	if s, ok := style.(tg.KeyboardButtonStyle); ok {
+		btn.SetStyle(s)
+	}
+	return btn
 }
 
 func ToSmallCaps(s string) string {

@@ -10,14 +10,22 @@ import (
 var ErrListenerTimeout = errors.New("timeout waiting for user response")
 
 type StateRegistry struct {
-	mu        sync.RWMutex
-	listeners map[int64]chan string
+	mu           sync.RWMutex
+	listeners    map[int64]chan string
+	lastInputIDs map[int64]int
 }
 
 func NewStateRegistry() *StateRegistry {
 	return &StateRegistry{
-		listeners: make(map[int64]chan string),
+		listeners:    make(map[int64]chan string),
+		lastInputIDs: make(map[int64]int),
 	}
+}
+
+func (sr *StateRegistry) GetLastInputMsgID(userID int64) int {
+	sr.mu.RLock()
+	defer sr.mu.RUnlock()
+	return sr.lastInputIDs[userID]
 }
 
 func (sr *StateRegistry) Register(userID int64) chan string {
@@ -42,6 +50,7 @@ func (sr *StateRegistry) Unregister(userID int64) {
 		close(ch)
 		delete(sr.listeners, userID)
 	}
+	delete(sr.lastInputIDs, userID)
 }
 
 func (sr *StateRegistry) Listen(ctx context.Context, userID int64, duration time.Duration) (string, error) {
@@ -64,10 +73,11 @@ func (sr *StateRegistry) Listen(ctx context.Context, userID int64, duration time
 	}
 }
 
-func (sr *StateRegistry) Push(userID int64, val string) bool {
-	sr.mu.RLock()
+func (sr *StateRegistry) Push(userID int64, val string, msgID int) bool {
+	sr.mu.Lock()
+	sr.lastInputIDs[userID] = msgID
 	ch, exists := sr.listeners[userID]
-	sr.mu.RUnlock()
+	sr.mu.Unlock()
 
 	if !exists {
 		return false

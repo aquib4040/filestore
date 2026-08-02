@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/gotd/td/tg"
@@ -28,12 +29,19 @@ func (bm *BotManager) registerMainHandlers(dispatcher *tg.UpdateDispatcher) {
 		}
 
 		// Dynamically register admin command scope with verified AccessHash
+		var senderUser *tg.User
 		if user, exists := entities.Users[userID]; exists {
+			senderUser = user
 			go bm.SetupAdminCommands(ctx, userID, user.AccessHash)
 		}
 
 		// Handle State Listeners (client.listen equivalent)
-		if bm.state.Push(userID, msg.Message) {
+		listenerVal := msg.Message
+		if fwd, ok := msg.GetFwdFrom(); ok && fwd.ChannelPost != 0 {
+			listenerVal = strconv.Itoa(fwd.ChannelPost)
+		}
+
+		if bm.state.Push(userID, listenerVal, msg.ID) {
 			return nil // consumed by listener
 		}
 
@@ -41,7 +49,7 @@ func (bm *BotManager) registerMainHandlers(dispatcher *tg.UpdateDispatcher) {
 		if strings.HasPrefix(msg.Message, "/") {
 			args := strings.Fields(msg.Message)
 			cmd := args[0]
-			return bm.handleMainCommand(ctx, userID, cmd, args[1:], msg)
+			return bm.handleMainCommand(ctx, userID, senderUser, cmd, args[1:], msg)
 		}
 
 		// Non-command text message
@@ -77,7 +85,7 @@ func (bm *BotManager) registerMainHandlers(dispatcher *tg.UpdateDispatcher) {
 						UserID:   &tg.InputUser{UserID: u.UserID},
 					})
 					if err != nil {
-						bm.logger.Warn("Failed to approve invite request", zap.Error(err))
+						bm.logger.Warn("Failed to approve invite request", zap.String("error", err.Error()))
 					} else {
 						bm.logger.Info("Approved join request", zap.Int64("user_id", u.UserID))
 					}
@@ -115,6 +123,11 @@ func (bm *BotManager) registerCloneHandlers(dispatcher *tg.UpdateDispatcher, tok
 					go bm.SetupCloneCommands(ctx, client, userID, user.AccessHash)
 				}
 			}
+		}
+
+		// Handle State Listeners (client.listen equivalent)
+		if bm.state.Push(userID, msg.Message, msg.ID) {
+			return nil // consumed by listener
 		}
 
 		if strings.HasPrefix(msg.Message, "/") {
