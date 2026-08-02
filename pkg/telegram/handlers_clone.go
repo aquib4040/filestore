@@ -106,6 +106,13 @@ func (bm *BotManager) handleCloneCommand(ctx context.Context, token string, user
 		}
 		return bm.sendCloneText(ctx, client, peer, msgText)
 
+	case "/logs":
+		if !isOwner && userID != bm.config.OwnerID {
+			return bm.sendCloneText(ctx, client, peer, "Unauthorized. Only the bot owner can access logs.")
+		}
+		go bm.handleSendLogs(ctx, client, userID)
+		return nil
+
 	case "/broadcast":
 		if !isOwner {
 			return bm.sendCloneText(ctx, client, peer, "Unauthorized.")

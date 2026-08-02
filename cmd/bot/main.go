@@ -35,9 +35,9 @@ func init() {
 }
 
 func main() {
-	// Initialize logger
 	cfgLog := zap.NewDevelopmentConfig()
 	cfgLog.DisableStacktrace = true
+	cfgLog.OutputPaths = []string{"stdout", "bot.log"}
 
 	loc, err := time.LoadLocation("Asia/Kolkata")
 	if err == nil {

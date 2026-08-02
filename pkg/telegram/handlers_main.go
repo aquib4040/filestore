@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/gotd/td/telegram/message/html"
 	"github.com/gotd/td/telegram/message/styling"
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 	"go.uber.org/zap"
@@ -35,6 +37,12 @@ func (bm *BotManager) handleMainCommand(ctx context.Context, userID int64, sende
 	switch cmd {
 	case "/start":
 		return bm.handleStart(ctx, userID, senderUser, args, msg)
+	case "/logs":
+		if userID != bm.config.OwnerID {
+			return bm.sendText(ctx, peer, "Unauthorized. Only the bot owner can access logs.")
+		}
+		go bm.handleSendLogs(ctx, nil, userID)
+		return nil
 	case "/settings":
 		if !bm.isAdmin(userID) {
 			return bm.sendText(ctx, peer, "Bakka! You are not my Senpai!")
@@ -1296,6 +1304,77 @@ func extractMessageID(input string) int {
 		}
 	}
 	return 0
+}
+
+func (bm *BotManager) handleSendLogs(ctx context.Context, client *telegram.Client, userID int64) {
+	peer := &tg.InputPeerUser{UserID: userID}
+
+	var api *tg.Client
+	if client != nil {
+		api = client.API()
+	} else {
+		api = bm.primary.API()
+	}
+
+	// Check if bot.log file exists
+	if _, err := os.Stat("bot.log"); os.IsNotExist(err) {
+		if client != nil {
+			_ = bm.sendCloneText(ctx, client, peer, "❌ No log file found on disk.")
+		} else {
+			_ = bm.sendText(ctx, peer, "❌ No log file found on disk.")
+		}
+		return
+	}
+
+	// Send uploading status
+	var statusMsgID int
+	if client != nil {
+		statusMsgID, _ = bm.sendCloneTextGetID(ctx, client, peer, "📤 **Uploading log file, please wait...**")
+	} else {
+		statusMsgID, _ = bm.sendTextGetID(ctx, peer, "📤 **Uploading log file, please wait...**")
+	}
+
+	u := uploader.NewUploader(api)
+	inputFile, err := u.FromPath(ctx, "bot.log")
+	if err != nil {
+		bm.logger.Warn("Failed to upload log file", zap.String("error", err.Error()))
+		if client != nil {
+			_ = bm.sendCloneText(ctx, client, peer, fmt.Sprintf("❌ **Failed to upload log file**: %s", err.Error()))
+		} else {
+			_ = bm.sendText(ctx, peer, fmt.Sprintf("❌ **Failed to upload log file**: %s", err.Error()))
+		}
+		if statusMsgID > 0 {
+			bm.deleteMessages(ctx, client, []int{statusMsgID})
+		}
+		return
+	}
+
+	_, err = api.MessagesSendMedia(ctx, &tg.MessagesSendMediaRequest{
+		Peer: peer,
+		Media: &tg.InputMediaUploadedDocument{
+			File:     inputFile,
+			MimeType: "text/plain",
+			Attributes: []tg.DocumentAttributeClass{
+				&tg.DocumentAttributeFilename{
+					FileName: "bot.log",
+				},
+			},
+		},
+		RandomID: getRandomID(),
+	})
+
+	if statusMsgID > 0 {
+		bm.deleteMessages(ctx, client, []int{statusMsgID})
+	}
+
+	if err != nil {
+		bm.logger.Warn("Failed to send log document", zap.String("error", err.Error()))
+		if client != nil {
+			_ = bm.sendCloneText(ctx, client, peer, fmt.Sprintf("❌ **Failed to send log document**: %s", err.Error()))
+		} else {
+			_ = bm.sendText(ctx, peer, fmt.Sprintf("❌ **Failed to send log document**: %s", err.Error()))
+		}
+	}
 }
 
 func parseHTML(text string) (string, []tg.MessageEntityClass) {
